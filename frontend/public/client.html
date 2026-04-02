@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="theme-color" content="#1A2E4A">
+<meta name="description" content="Wallet, fidélité, hôtels &amp; voyages SOKORA">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SOKORA">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+<title>SOKORA — Mon Expérience</title>
+<style>
+:root {
+  --navy: #1A2E4A; --orange: #F97316; --green: #22C55E;
+  --purple: #8B5CF6; --teal: #14B8A6; --red: #EF4444;
+  --bg: #F1F5F9; --card: #fff; --border: #E2E8F0;
+  --text: #1A2E4A; --muted: #64748B; --faint: #CBD5E1;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); max-width: 480px; margin: 0 auto; min-height: 100vh; }
+
+/* INSTALL BANNER */
+#install-btn { display: none; position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%); width: calc(100% - 32px); max-width: 448px; background: var(--orange); color: #fff; border: none; border-radius: 14px; padding: 14px 20px; font-size: 15px; font-weight: 700; cursor: pointer; z-index: 200; align-items: center; gap: 10px; box-shadow: 0 4px 20px rgba(249,115,22,0.4); }
+#install-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
+#install-btn span { flex: 1; }
+#install-btn .install-close { font-size: 18px; opacity: 0.7; padding: 0 4px; }
+
+/* NAV */
+.nav { background: var(--navy); padding: 0; position: sticky; bottom: 0; z-index: 100; display: flex; border-top: 1px solid rgba(255,255,255,0.1); }
+.nav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 4px 14px; border: none; background: none; color: rgba(255,255,255,0.5); font-size: 10px; cursor: pointer; transition: color 0.2s; }
+.nav-btn.active { color: var(--orange); }
+.nav-btn svg { width: 22px; height: 22px; }
+
+/* HEADER */
+.header { background: var(--navy); padding: 48px 20px 20px; color: #fff; }
+.header-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.header-logo { font-size: 22px; font-weight: 900; color: var(--orange); letter-spacing: -1px; }
+.header-sub { font-size: 13px; color: rgba(255,255,255,0.6); }
+
+/* SCREENS */
+.screen { display: none; min-height: calc(100vh - 64px); padding-bottom: 80px; }
+.screen.active { display: block; }
+
+/* AUTH */
+.auth-wrap { padding: 40px 24px; display: flex; flex-direction: column; gap: 24px; align-items: center; min-height: 80vh; justify-content: center; }
+.auth-logo { font-size: 48px; font-weight: 900; color: var(--orange); text-align: center; }
+.auth-title { font-size: 24px; font-weight: 800; color: var(--navy); text-align: center; }
+.auth-sub { font-size: 14px; color: var(--muted); text-align: center; }
+.auth-form { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+.input { width: 100%; padding: 16px; border: 2px solid var(--border); border-radius: 14px; font-size: 16px; color: var(--text); background: #fff; outline: none; transition: border-color 0.2s; }
+.input:focus { border-color: var(--orange); }
+.btn { width: 100%; padding: 16px; border: none; border-radius: 14px; font-size: 16px; font-weight: 700; cursor: pointer; transition: opacity 0.2s; }
+.btn:active { opacity: 0.8; }
+.btn-primary { background: var(--orange); color: #fff; }
+.btn-secondary { background: var(--navy); color: #fff; }
+.btn-green { background: var(--green); color: #fff; }
+.btn-sm { padding: 10px 20px; font-size: 14px; width: auto; border-radius: 10px; }
+.otp-inputs { display: flex; gap: 10px; justify-content: center; }
+.otp-input { width: 58px; height: 64px; border: 2px solid var(--border); border-radius: 14px; font-size: 28px; font-weight: 800; text-align: center; color: var(--orange); background: #fff; outline: none; }
+.otp-input:focus { border-color: var(--orange); }
+
+/* CARDS */
+.card { background: var(--card); border-radius: 16px; border: 1px solid var(--border); overflow: hidden; }
+.card-pad { padding: 16px; }
+.section { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.section-title { font-size: 16px; font-weight: 800; color: var(--navy); }
+
+/* KPI ROW */
+.kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px; }
+.kpi-card { background: var(--card); border-radius: 14px; padding: 14px; border: 1px solid var(--border); border-top: 3px solid var(--orange); }
+.kpi-val { font-size: 20px; font-weight: 800; color: var(--navy); }
+.kpi-lbl { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* STATUS BADGE */
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+
+/* ORDER ITEMS */
+.order-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.order-item:last-child { border-bottom: none; }
+.order-item-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.order-item-qty { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.order-item-price { font-size: 14px; font-weight: 700; color: var(--orange); }
+
+/* TOTAL BAR */
+.total-bar { background: var(--navy); margin: 0 16px; border-radius: 14px; padding: 16px; display: flex; justify-content: space-between; align-items: center; }
+.total-label { font-size: 13px; color: rgba(255,255,255,0.6); }
+.total-amount { font-size: 24px; font-weight: 800; color: var(--orange); }
+
+/* MENU */
+.category-tabs { display: flex; gap: 8px; padding: 16px; overflow-x: auto; scrollbar-width: none; }
+.category-tabs::-webkit-scrollbar { display: none; }
+.cat-tab { flex-shrink: 0; padding: 8px 16px; border-radius: 20px; background: var(--card); border: 1px solid var(--border); font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.cat-tab.active { background: var(--orange); border-color: var(--orange); color: #fff; }
+.menu-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.menu-item:last-child { border-bottom: none; }
+.menu-item-name { font-size: 14px; font-weight: 700; color: var(--text); }
+.menu-item-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.menu-item-price { font-size: 16px; font-weight: 800; color: var(--orange); flex-shrink: 0; margin-left: 12px; }
+
+/* NEARBY */
+.resto-card { background: var(--card); border-radius: 16px; border: 1px solid var(--border); margin: 0 16px; overflow: hidden; cursor: pointer; transition: transform 0.1s; }
+.resto-card:active { transform: scale(0.98); }
+.resto-header { background: var(--navy); padding: 20px; }
+.resto-name { font-size: 18px; font-weight: 800; color: #fff; }
+.resto-addr { font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 4px; }
+.resto-dist { font-size: 13px; color: var(--orange); font-weight: 700; margin-top: 8px; }
+
+/* LOYALTY */
+.loyalty-hero { background: linear-gradient(135deg, var(--navy), #2D4A7A); padding: 28px 20px; color: #fff; text-align: center; }
+.loyalty-points { font-size: 56px; font-weight: 900; color: var(--orange); line-height: 1; }
+.loyalty-level { display: inline-block; padding: 4px 16px; border-radius: 20px; font-size: 13px; font-weight: 700; margin-top: 8px; }
+.level-starter  { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); }
+.level-bronze   { background: #CD7F32; color: #fff; }
+.level-silver   { background: #C0C0C0; color: var(--navy); }
+.level-gold     { background: #FFD700; color: var(--navy); }
+.progress-bar   { height: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; margin: 12px 0 4px; overflow: hidden; }
+.progress-fill  { height: 6px; background: var(--orange); border-radius: 3px; transition: width 0.5s; }
+.tx-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.tx-row:last-child { border-bottom: none; }
+.tx-type { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; }
+.tx-earn   { background: #F0FDF4; color: var(--green); }
+.tx-redeem { background: #FEF2F2; color: var(--red); }
+.tx-desc { font-size: 13px; color: var(--text); margin-top: 2px; }
+.tx-date { font-size: 11px; color: var(--muted); }
+.tx-pts  { font-size: 16px; font-weight: 800; }
+
+/* RECEIPT */
+.receipt { background: #fff; margin: 16px; border-radius: 16px; border: 2px dashed var(--border); padding: 24px; }
+.receipt-logo { font-size: 28px; font-weight: 900; color: var(--orange); text-align: center; }
+.receipt-resto { text-align: center; color: var(--muted); font-size: 13px; margin-top: 4px; }
+.receipt-divider { border: none; border-top: 1px dashed var(--border); margin: 16px 0; }
+.receipt-row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 8px; }
+.receipt-total { display: flex; justify-content: space-between; font-size: 20px; font-weight: 800; color: var(--navy); margin-top: 12px; padding-top: 12px; border-top: 2px solid var(--navy); }
+.receipt-method { text-align: center; font-size: 12px; color: var(--muted); margin-top: 12px; }
+.receipt-check { text-align: center; font-size: 40px; margin-top: 16px; }
+
+
+/* WALLET */
+.wallet-hero { background: linear-gradient(135deg, #1A2E4A, #2D4A7A); padding: 28px 20px; color: #fff; }
+.wallet-balance { font-size: 52px; font-weight: 900; color: #F97316; line-height: 1; }
+.wallet-label { font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 8px; }
+.wallet-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 16px; }
+.wallet-action { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; transition: transform 0.1s; }
+.wallet-action:active { transform: scale(0.95); }
+.wallet-action-icon { font-size: 24px; }
+.wallet-action-label { font-size: 11px; font-weight: 700; color: var(--navy); text-align: center; }
+.topup-method { display: flex; gap: 8px; flex-wrap: wrap; }
+.method-btn { flex: 1; min-width: 80px; padding: 12px 8px; border: 2px solid var(--border); border-radius: 12px; background: #fff; font-size: 12px; font-weight: 700; cursor: pointer; text-align: center; transition: all 0.2s; }
+.method-btn.selected { border-color: var(--orange); background: #FFF7ED; color: var(--orange); }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: flex-end; }
+.modal-sheet { background: #fff; border-radius: 24px 24px 0 0; padding: 24px; width: 100%; max-height: 85vh; overflow-y: auto; }
+.modal-title { font-size: 18px; font-weight: 800; color: var(--navy); margin-bottom: 16px; }
+.modal-close { float: right; font-size: 20px; cursor: pointer; color: var(--muted); }
+
+
+/* QR WALLET */
+.qr-modal-hero { background: linear-gradient(135deg, #1A2E4A, #2D4A7A); padding: 24px 20px; text-align:center; border-radius: 16px 16px 0 0; }
+.qr-wrap { background: #fff; border-radius: 16px; padding: 16px; display: inline-block; margin: 16px auto; box-shadow: 0 4px 24px rgba(0,0,0,0.12); }
+.qr-client-name { font-size: 18px; font-weight: 800; color: #fff; margin-top: 8px; }
+.qr-client-phone { font-size: 13px; color: rgba(255,255,255,0.6); margin-top: 2px; }
+.qr-balance-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(249,115,22,0.15); border: 1px solid var(--orange); border-radius: 20px; padding: 6px 16px; margin-top: 12px; }
+.qr-balance-val { font-size: 20px; font-weight: 900; color: var(--orange); }
+.qr-pending-list { max-height: 200px; overflow-y: auto; }
+.qr-pending-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.qr-pending-item:last-child { border-bottom: none; }
+.qr-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #F97316; animation: pulse 1.5s infinite; display: inline-block; margin-right: 6px; }
+
+/* UTILS */
+.spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid var(--border); border-top-color: var(--orange); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--navy); color: #fff; padding: 12px 24px; border-radius: 24px; font-size: 14px; font-weight: 600; z-index: 999; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
+.toast.show { opacity: 1; }
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; gap: 12px; color: var(--muted); }
+.empty-icon { font-size: 48px; }
+.empty-text { font-size: 16px; font-weight: 700; color: var(--navy); }
+.empty-sub  { font-size: 13px; text-align: center; }
+.text-muted { color: var(--muted); font-size: 13px; }
+.mt-8 { margin-top: 8px; }
+.gap-12 { display: flex; flex-direction: column; gap: 12px; }
+.pulse { animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+.pay-request-card { background: var(--card); border-radius: 14px; border: 1px solid var(--border); padding: 16px; margin-bottom: 10px; }
+.pay-request-card.urgent { border-color: var(--orange); border-left: 4px solid var(--orange); }
+.pay-request-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.pay-request-restaurant { font-size: 15px; font-weight: 800; color: var(--navy); }
+.pay-request-amount { font-size: 20px; font-weight: 900; color: var(--orange); }
+.pay-request-detail { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.pay-request-actions { display: flex; gap: 8px; }
+.btn-pay-confirm { flex: 2; background: #19A99D; color: #fff; border: none; border-radius: 10px; padding: 12px; font-weight: 800; font-size: 14px; cursor: pointer; }
+.btn-pay-reject  { flex: 1; background: var(--border); color: var(--muted); border: none; border-radius: 10px; padding: 12px; font-weight: 700; font-size: 13px; cursor: pointer; }
+.pay-requests-section { padding: 0 16px 16px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- SCREEN: AUTH -->
+<div class="screen active" id="screen-auth">
+  <div class="auth-wrap">
+    <div>
+      <div class="auth-logo">SOKORA</div>
+      <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:4px;">Votre expérience restaurant</div>
+    </div>
+    <div id="auth-phone-step" class="auth-form">
+      <div class="auth-title">Bienvenue 👋</div>
+      <div class="auth-sub">Entrez votre numéro pour continuer</div>
+      <input class="input" type="tel" id="input-phone" placeholder="Ex: 07 01 02 03 04" inputmode="tel">
+      <button class="btn btn-primary" onclick="requestOTP()">Recevoir le code WhatsApp</button>
+    </div>
+    <div id="auth-otp-step" class="auth-form" style="display:none">
+      <div class="auth-title">Code reçu ? 📱</div>
+      <div class="auth-sub" id="otp-hint">Code envoyé sur WhatsApp</div>
+      <div class="otp-inputs">
+        <input class="otp-input" maxlength="1" id="otp0" oninput="otpInput(0)" inputmode="numeric">
+        <input class="otp-input" maxlength="1" id="otp1" oninput="otpInput(1)" inputmode="numeric">
+        <input class="otp-input" maxlength="1" id="otp2" oninput="otpInput(2)" inputmode="numeric">
+        <input class="otp-input" maxlength="1" id="otp3" oninput="otpInput(3)" inputmode="numeric">
+      </div>
+      <button class="btn btn-primary" onclick="verifyOTP()">Valider</button>
+      <button class="btn" style="background:none;color:var(--muted);font-size:14px;" onclick="showPhoneStep()">← Changer de numéro</button>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: HOME -->
+<div class="screen" id="screen-home">
+  <div class="header">
+    <div class="header-brand">
+      <span class="header-logo">SOKORA</span>
+    </div>
+    <div id="home-greeting" class="header-sub">Chargement...</div>
+  </div>
+
+  <!-- Ma table active -->
+  <div id="home-table-section" style="display:none">
+    <div class="section">
+      <div class="section-title">📍 Ma table en cours</div>
+      <div class="card" id="home-order-card" onclick="showScreen('order')" style="cursor:pointer">
+        <div class="card-pad" style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:800;font-size:16px;color:var(--navy)" id="home-table-label">Table...</div>
+            <div id="home-order-status" class="badge mt-8"></div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:22px;font-weight:800;color:var(--orange)" id="home-order-total">0 F</div>
+            <div class="text-muted">Voir détails →</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Restos à proximité -->
+  <div class="section">
+    <div class="section-title">🗺️ Restaurants SOKORA autour de vous</div>
+    <div id="home-nearby" class="gap-12">
+      <div class="empty"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: ORDER -->
+<div class="screen" id="screen-order">
+  <div class="header">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button onclick="showScreen('home')" style="background:rgba(255,255,255,0.1);border:none;border-radius:50%;width:36px;height:36px;color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center">←</button>
+      <div>
+        <div style="font-size:18px;font-weight:800;color:#fff">Ma commande</div>
+        <div id="order-table-lbl" style="font-size:12px;color:rgba(255,255,255,0.6)"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="order-loading" class="empty" style="padding:60px 20px">
+    <div class="spinner"></div><div class="text-muted">Chargement...</div>
+  </div>
+
+  <div id="order-content" style="display:none">
+    <!-- Status -->
+    <div style="padding:16px">
+      <div class="card" style="padding:20px;text-align:center">
+        <div id="order-status-icon" style="font-size:36px;margin-bottom:8px"></div>
+        <div id="order-status-label" style="font-size:18px;font-weight:800;color:var(--navy)"></div>
+        <div id="order-status-sub" class="text-muted mt-8"></div>
+      </div>
+    </div>
+
+    <!-- Articles -->
+    <div class="section">
+      <div class="section-title">Articles commandés</div>
+      <div class="card" id="order-items-list"></div>
+    </div>
+
+    <!-- Total -->
+    <div class="total-bar" id="order-total-bar">
+      <div><div class="total-label">TOTAL</div></div>
+      <div class="total-amount" id="order-total-amount">0 F</div>
+    </div>
+
+    <!-- Payer -->
+    <div id="order-pay-section" style="padding:16px;display:none">
+      <div class="section-title" style="margin-bottom:12px">💳 Payer maintenant</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm" style="background:#4CAF50;color:#fff" onclick="initiatePayment('wave')">
+          📱 Wave
+        </button>
+        <button class="btn btn-sm" style="background:#FF6600;color:#fff" onclick="initiatePayment('orange_money')">
+          🟠 Orange Money
+        </button>
+        <button class="btn btn-sm" style="background:#FFCC00;color:var(--navy)" onclick="initiatePayment('mtn_money')">
+          🟡 MTN Money
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="order-empty" class="empty" style="display:none">
+    <div class="empty-icon">🍽️</div>
+    <div class="empty-text">Aucune commande en cours</div>
+    <div class="empty-sub">Votre serveur va bientôt prendre votre commande</div>
+    <button class="btn btn-primary btn-sm mt-8" onclick="refreshOrder()">Actualiser</button>
+  </div>
+</div>
+
+<!-- SCREEN: MENU -->
+<div class="screen" id="screen-menu">
+  <div class="header">
+    <div class="header-brand">
+      <span class="header-logo">Menu</span>
+    </div>
+    <div id="menu-resto-name" class="header-sub"></div>
+  </div>
+  <div class="category-tabs" id="menu-cat-tabs"></div>
+  <div id="menu-content"></div>
+</div>
+
+<!-- SCREEN: LOYALTY -->
+<div class="screen" id="screen-loyalty">
+  <div id="loyalty-content">
+    <div class="loyalty-hero">
+      <div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:8px">MES POINTS FIDÉLITÉ</div>
+      <div class="loyalty-points" id="loyalty-pts">0</div>
+      <div class="loyalty-level level-starter" id="loyalty-level">Starter</div>
+      <div id="loyalty-progress-wrap" style="margin-top:16px">
+        <div class="progress-bar"><div class="progress-fill" id="loyalty-progress" style="width:0%"></div></div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.5)" id="loyalty-progress-label"></div>
+      </div>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi-card" style="border-top-color:var(--orange)">
+        <div class="kpi-val" id="loyalty-spent">0 F</div>
+        <div class="kpi-lbl">Total dépensé</div>
+      </div>
+      <div class="kpi-card" style="border-top-color:var(--green)">
+        <div class="kpi-val" id="loyalty-visits">0</div>
+        <div class="kpi-lbl">Visites</div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Historique des points</div>
+      <div class="card" id="loyalty-txs"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: PROFILE -->
+<div class="screen" id="screen-profile">
+  <div class="header">
+    <div class="header-brand"><span class="header-logo">Mon profil</span></div>
+    <div id="profile-phone" class="header-sub"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">Informations</div>
+    <div class="card">
+      <div class="card-pad gap-12">
+        <input class="input" id="profile-name-input" placeholder="Votre prénom / nom" style="margin-bottom:0">
+        <button class="btn btn-primary" onclick="saveProfile()">Sauvegarder</button>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <button class="btn" style="background:var(--border);color:var(--muted)" onclick="logout()">Se déconnecter</button>
+  </div>
+</div>
+
+
+<!-- SCREEN: WALLET -->
+<div class="screen" id="screen-wallet">
+  <div class="wallet-hero">
+    <div class="wallet-label">MON WALLET SOKORA</div>
+    <div class="wallet-balance" id="wallet-balance">0 F</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:6px" id="wallet-cashback-info"></div>
+  </div>
+
+  <!-- Stats -->
+  <div class="kpi-row">
+    <div class="kpi-card" style="border-top-color:var(--green)">
+      <div class="kpi-val" id="wallet-loaded">0 F</div>
+      <div class="kpi-lbl">Total rechargé</div>
+    </div>
+    <div class="kpi-card" style="border-top-color:var(--teal)">
+      <div class="kpi-val" id="wallet-cashback-total">0 F</div>
+      <div class="kpi-lbl">Cashback reçu</div>
+    </div>
+  </div>
+
+  <!-- Actions rapides -->
+  <div class="wallet-actions" style="grid-template-columns:1fr 1fr">
+    <div class="wallet-action" onclick="showTopupModal()">
+      <div class="wallet-action-icon">💳</div>
+      <div class="wallet-action-label">Recharger</div>
+    </div>
+    <div class="wallet-action" onclick="showQRModal()">
+      <div class="wallet-action-icon">📲</div>
+      <div class="wallet-action-label">Mon QR Wallet</div>
+    </div>
+    <div class="wallet-action" onclick="showPayModal()">
+      <div class="wallet-action-icon">🍽️</div>
+      <div class="wallet-action-label">Payer commande</div>
+    </div>
+    <div class="wallet-action" onclick="showTransferModal()">
+      <div class="wallet-action-icon">🎁</div>
+      <div class="wallet-action-label">Offrir à un(e) ami(e)</div>
+    </div>
+  </div>
+
+  <!-- Demandes de paiement -->
+  <div class="pay-requests-section" id="pay-requests-section" style="display:none">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <div style="width:8px;height:8px;border-radius:50%;background:var(--orange);animation:pulse 1.5s infinite"></div>
+      <div style="font-size:15px;font-weight:800;color:var(--navy)">Demandes de paiement</div>
+    </div>
+    <div id="pay-requests-list"></div>
+  </div>
+
+  <!-- Historique -->
+  <div class="section">
+    <div class="section-title">Historique</div>
+    <div class="card" id="wallet-txs">
+      <div class="empty" style="padding:24px"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: RECHARGE -->
+<div class="modal-overlay" id="modal-topup" style="display:none" onclick="closeModal('topup')">
+  <div class="modal-sheet" onclick="event.stopPropagation()">
+    <span class="modal-close" onclick="closeModal('topup')">✕</span>
+    <div class="modal-title">💳 Recharger mon wallet</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Montant (F CFA)</div>
+        <input class="input" type="number" id="topup-amount" placeholder="Ex: 5000" inputmode="numeric">
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn btn-sm" style="background:var(--border);color:var(--navy)" onclick="setAmount(2000)">2 000</button>
+          <button class="btn btn-sm" style="background:var(--border);color:var(--navy)" onclick="setAmount(5000)">5 000</button>
+          <button class="btn btn-sm" style="background:var(--border);color:var(--navy)" onclick="setAmount(10000)">10 000</button>
+          <button class="btn btn-sm" style="background:var(--border);color:var(--navy)" onclick="setAmount(20000)">20 000</button>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Moyen de paiement</div>
+        <div class="topup-method">
+          <div class="method-btn selected" id="method-wave" onclick="selectMethod('wave')">📱 Wave</div>
+          <div class="method-btn" id="method-orange_money" onclick="selectMethod('orange_money')">🟠 Orange</div>
+          <div class="method-btn" id="method-mtn_money" onclick="selectMethod('mtn_money')">🟡 MTN</div>
+          <div class="method-btn" id="method-cash" onclick="selectMethod('cash')">💵 Espèces</div>
+          <div class="method-btn" id="method-card" onclick="selectMethod('card')">💳 Carte</div>
+        </div>
+      </div>
+      <div id="topup-phone-wrap">
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Numéro mobile money</div>
+        <input class="input" type="tel" id="topup-phone" placeholder="Ex: 07 01 02 03 04" inputmode="tel">
+      </div>
+      <button class="btn btn-primary" onclick="submitTopup()">Envoyer la demande</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: PAYER -->
+<div class="modal-overlay" id="modal-pay" style="display:none" onclick="closeModal('pay')">
+  <div class="modal-sheet" onclick="event.stopPropagation()">
+    <span class="modal-close" onclick="closeModal('pay')">✕</span>
+    <div class="modal-title">🍽️ Payer avec mon wallet</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card" style="padding:16px;background:#F8FAFC">
+        <div style="font-size:13px;color:var(--muted)">Solde disponible</div>
+        <div style="font-size:28px;font-weight:800;color:var(--navy)" id="pay-modal-balance">0 F</div>
+      </div>
+      <div id="pay-order-info" style="display:none">
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:4px">Commande en cours</div>
+        <div class="card" style="padding:12px;display:flex;justify-content:space-between">
+          <span id="pay-order-label" style="color:var(--muted);font-size:13px"></span>
+          <span id="pay-order-amount" style="font-weight:800;color:var(--orange)"></span>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Montant à payer</div>
+        <input class="input" type="number" id="pay-amount" placeholder="Montant" inputmode="numeric">
+      </div>
+      <button class="btn btn-primary" onclick="submitWalletPay()">Payer maintenant</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: TRANSFERT -->
+<div class="modal-overlay" id="modal-transfer" style="display:none" onclick="closeModal('transfer')">
+  <div class="modal-sheet" onclick="event.stopPropagation()">
+    <span class="modal-close" onclick="closeModal('transfer')">✕</span>
+    <div class="modal-title">🎁 Offrir à un(e) ami(e)</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Numéro du destinataire</div>
+        <input class="input" type="tel" id="transfer-phone" placeholder="Numéro SOKORA du destinataire" inputmode="tel">
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Montant (F CFA)</div>
+        <input class="input" type="number" id="transfer-amount" placeholder="Ex: 5000" inputmode="numeric">
+      </div>
+      <button class="btn btn-green" onclick="submitTransfer()">Envoyer le cadeau 🎁</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- MODAL: QR WALLET -->
+<div class="modal-overlay" id="modal-qr" style="display:none" onclick="closeModal('qr')">
+  <div class="modal-sheet" onclick="event.stopPropagation()" style="padding:0;overflow:hidden">
+    <div class="qr-modal-hero">
+      <div style="font-size:12px;color:rgba(255,255,255,0.5);letter-spacing:1px;margin-bottom:4px">MON QR WALLET SOKORA</div>
+      <div class="qr-wrap">
+        <div id="qr-code-canvas"></div>
+      </div>
+      <div class="qr-client-name" id="qr-name">Chargement...</div>
+      <div class="qr-client-phone" id="qr-phone"></div>
+      <div class="qr-balance-badge">
+        <span style="font-size:12px;color:rgba(255,255,255,0.7)">Solde</span>
+        <span class="qr-balance-val" id="qr-balance">0 F</span>
+      </div>
+    </div>
+
+    <!-- Demandes en attente -->
+    <div id="qr-pending-section" style="display:none">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+        <span class="qr-status-dot"></span>
+        <span style="font-size:14px;font-weight:700;color:var(--navy)">Demandes de recharge en attente</span>
+      </div>
+      <div class="qr-pending-list" id="qr-pending-list"></div>
+    </div>
+
+    <!-- Instructions -->
+    <div style="padding:20px;text-align:center">
+      <div style="font-size:13px;color:var(--muted);line-height:1.6">
+        Présentez ce QR code au caissier.<br>
+        Il scanne et crédite votre wallet instantanément.
+      </div>
+      <button class="btn" style="background:var(--border);color:var(--muted);margin-top:16px;width:auto;padding:12px 32px" onclick="closeModal('qr')">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- PWA INSTALL BANNER -->
+<button id="install-btn" onclick="installApp()">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v13M7 11l5 5 5-5"/><path d="M3 18v2a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-2"/></svg>
+  <span>Installer l'app SOKORA</span>
+  <span class="install-close" onclick="event.stopPropagation();this.closest('#install-btn').style.display='none'">✕</span>
+</button>
+
+<!-- BOTTOM NAV -->
+<nav class="nav" id="main-nav" style="display:none">
+  <button class="nav-btn active" id="nav-home" onclick="showScreen('home')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+    Accueil
+  </button>
+  <button class="nav-btn" id="nav-order" onclick="showScreen('order')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1" ry="1"/></svg>
+    Commande
+  </button>
+  <button class="nav-btn" id="nav-menu" onclick="showScreen('menu')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+    Menu
+  </button>
+  <button class="nav-btn" id="nav-wallet" onclick="showScreen('wallet')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3h-4a2 2 0 0 0-2 2v2h8V5a2 2 0 0 0-2-2z"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+    Wallet
+  </button>
+  <button class="nav-btn" id="nav-loyalty" onclick="showScreen('loyalty')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+    Fidélité
+  </button>
+  <button class="nav-btn" id="nav-profile" onclick="showScreen('profile')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    Profil
+  </button>
+</nav>
+
+<script>
+// ─── CONFIG ───────────────────────────────────────────────────
+const API = window.location.origin.replace(':3000', ':8001');
+let CLIENT_TOKEN = localStorage.getItem('sokora_client_token') || '';
+let CLIENT_DATA  = JSON.parse(localStorage.getItem('sokora_client_data') || 'null');
+let CURRENT_EST  = JSON.parse(localStorage.getItem('sokora_current_est') || 'null');
+let CURRENT_TABLE = JSON.parse(localStorage.getItem('sokora_current_table') || 'null');
+let CURRENT_PHONE = '';
+let ORDER_POLL = null;
+
+const fmt = n => new Intl.NumberFormat('fr-FR').format(Math.round(n||0)) + ' F';
+const fmtPts = n => new Intl.NumberFormat('fr-FR').format(n||0) + ' pts';
+
+// ─── INIT ─────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  // Lire params URL: /client?est=2&table=5
+  const params = new URLSearchParams(window.location.search);
+  const estId = params.get('est');
+  const tableId = params.get('table');
+  if (estId && tableId) {
+    localStorage.setItem('sokora_current_est', JSON.stringify({ id: parseInt(estId) }));
+    localStorage.setItem('sokora_current_table', JSON.stringify({ id: parseInt(tableId) }));
+    CURRENT_EST   = { id: parseInt(estId) };
+    CURRENT_TABLE = { id: parseInt(tableId) };
+  }
+
+  if (CLIENT_TOKEN) {
+    showMainApp();
+  } else {
+    document.getElementById('screen-auth').classList.add('active');
+  }
+});
+
+// ─── AUTH ─────────────────────────────────────────────────────
+function showPhoneStep() {
+  document.getElementById('auth-phone-step').style.display = '';
+  document.getElementById('auth-otp-step').style.display = 'none';
+}
+
+async function requestOTP() {
+  const phone = document.getElementById('input-phone').value.trim();
+  if (!phone) { showToast('Entrez votre numéro'); return; }
+  CURRENT_PHONE = phone;
+  try {
+    const r = await api('POST', '/client/auth/request-otp', { phone });
+    document.getElementById('otp-hint').textContent = `Code envoyé au ${phone} via WhatsApp`;
+    document.getElementById('auth-phone-step').style.display = 'none';
+    document.getElementById('auth-otp-step').style.display = '';
+    document.getElementById('otp0').focus();
+  } catch(e) { showToast('Erreur envoi OTP'); }
+}
+
+function otpInput(i) {
+  const val = document.getElementById(`otp${i}`).value;
+  if (val && i < 3) document.getElementById(`otp${i+1}`).focus();
+  if (val.length > 1) document.getElementById(`otp${i}`).value = val[0];
+}
+
+async function verifyOTP() {
+  const code = [0,1,2,3].map(i => document.getElementById(`otp${i}`).value).join('');
+  if (code.length < 4) { showToast('Code incomplet'); return; }
+  try {
+    const r = await api('POST', '/client/auth/verify-otp', { phone: CURRENT_PHONE, code });
+    CLIENT_TOKEN = r.token;
+    CLIENT_DATA  = r.client;
+    localStorage.setItem('sokora_client_token', CLIENT_TOKEN);
+    localStorage.setItem('sokora_client_data', JSON.stringify(CLIENT_DATA));
+    showMainApp();
+  } catch(e) { showToast('Code invalide ou expiré'); }
+}
+
+// ─── APP ──────────────────────────────────────────────────────
+function showMainApp() {
+  document.getElementById('screen-auth').classList.remove('active');
+  document.getElementById('main-nav').style.display = 'flex';
+  showScreen('home');
+  loadHome();
+  if (CURRENT_TABLE) startOrderPoll();
+}
+
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(`screen-${name}`).classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const nb = document.getElementById(`nav-${name}`);
+  if (nb) nb.classList.add('active');
+
+  if (name === 'loyalty') loadLoyalty();
+  if (name === 'wallet') {
+    loadWallet();
+    loadPaymentRequests();
+    if (payRequestsInterval) clearInterval(payRequestsInterval);
+    payRequestsInterval = setInterval(loadPaymentRequests, 8000);
+  } else {
+    if (payRequestsInterval) { clearInterval(payRequestsInterval); payRequestsInterval = null; }
+  }
+  if (name === 'order')   loadOrder();
+  if (name === 'profile') loadProfile();
+}
+
+// ─── HOME ─────────────────────────────────────────────────────
+async function loadHome() {
+  const name = CLIENT_DATA?.name || CLIENT_DATA?.phone || 'vous';
+  document.getElementById('home-greeting').textContent = `Bonjour ${name} 👋`;
+
+  // Commande en cours
+  if (CURRENT_TABLE && CURRENT_EST) {
+    loadHomeOrderSummary();
+  }
+
+  // Restos à proximité
+  loadNearby();
+
+  // Charger menu si établissement connu
+  if (CURRENT_EST) loadMenu(CURRENT_EST.id);
+}
+
+async function loadHomeOrderSummary() {
+  try {
+    const r = await api('GET', `/client/order/${CURRENT_EST.id}/${CURRENT_TABLE.id}`);
+    if (r.has_order) {
+      document.getElementById('home-table-section').style.display = '';
+      document.getElementById('home-table-label').textContent = `Table ${CURRENT_TABLE.id}`;
+      document.getElementById('home-order-total').textContent = fmt(r.total);
+      const statusEl = document.getElementById('home-order-status');
+      statusEl.textContent = r.status_label;
+      statusEl.style.background = r.status_color + '22';
+      statusEl.style.color = r.status_color;
+    }
+  } catch(e) {}
+}
+
+async function loadNearby() {
+  const nearbyEl = document.getElementById('home-nearby');
+  try {
+    let lat = 5.3364, lng = -4.0267;
+    try {
+      const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, {timeout:3000}));
+      lat = pos.coords.latitude; lng = pos.coords.longitude;
+    } catch(e) {}
+
+    const restos = await api('GET', `/client/establishments?lat=${lat}&lng=${lng}&radius=999`);
+    if (!restos.length) {
+      nearbyEl.innerHTML = '<div class="empty"><div class="empty-text">Aucun restaurant trouvé</div></div>';
+      return;
+    }
+    nearbyEl.innerHTML = restos.map(r => `
+      <div class="resto-card" onclick="openResto(${r.id}, '${(r.name||'').replace(/'/g,"\\'")}')">
+        <div class="resto-header">
+          <div class="resto-name">${r.name}</div>
+          <div class="resto-addr">${r.address || ''}</div>
+          ${r.distance_km < 9000 ? `<div class="resto-dist">📍 ${r.distance_km} km</div>` : ''}
+        </div>
+        <div class="card-pad" style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px;color:var(--muted)">${r.description || 'Restaurant SOKORA'}</span>
+          <span style="font-size:13px;color:var(--orange);font-weight:700">Voir menu →</span>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    nearbyEl.innerHTML = '<div class="empty"><div class="empty-text">Impossible de charger</div></div>';
+  }
+}
+
+function openResto(estId, name) {
+  CURRENT_EST = { id: estId, name };
+  localStorage.setItem('sokora_current_est', JSON.stringify(CURRENT_EST));
+  loadMenu(estId);
+  showScreen('menu');
+}
+
+// ─── ORDER ────────────────────────────────────────────────────
+function startOrderPoll() {
+  if (ORDER_POLL) clearInterval(ORDER_POLL);
+  ORDER_POLL = setInterval(loadOrder, 10000);
+}
+
+async function loadOrder() {
+  if (!CURRENT_TABLE || !CURRENT_EST) {
+    document.getElementById('order-loading').style.display = 'none';
+    document.getElementById('order-empty').style.display = '';
+    document.getElementById('order-content').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('order-loading').style.display = '';
+  document.getElementById('order-empty').style.display = 'none';
+  document.getElementById('order-content').style.display = 'none';
+
+  try {
+    const r = await api('GET', `/client/order/${CURRENT_EST.id}/${CURRENT_TABLE.id}`);
+    document.getElementById('order-loading').style.display = 'none';
+
+    if (!r.has_order) {
+      document.getElementById('order-empty').style.display = '';
+      return;
+    }
+
+    document.getElementById('order-content').style.display = '';
+    document.getElementById('order-table-lbl').textContent = CURRENT_EST.name || '';
+
+    const icons = { open: '⏳', sent: '👨‍🍳', ready: '✅', paid: '💳' };
+    document.getElementById('order-status-icon').textContent = icons[r.status] || '⏳';
+    document.getElementById('order-status-label').textContent = r.status_label;
+    document.getElementById('order-status-sub').textContent =
+      r.status === 'ready' ? 'Votre commande est prête !' :
+      r.status === 'sent'  ? 'En préparation en cuisine...' :
+      r.status === 'paid'  ? 'Paiement reçu, merci !' :
+      'En attente de traitement';
+
+    const itemsList = document.getElementById('order-items-list');
+    itemsList.innerHTML = r.items.map(i => `
+      <div class="order-item">
+        <div>
+          <div class="order-item-name">${i.product_name}</div>
+          <div class="order-item-qty">${i.quantity} × ${fmt(i.unit_price)}</div>
+        </div>
+        <div class="order-item-price">${fmt(i.subtotal)}</div>
+      </div>
+    `).join('');
+
+    document.getElementById('order-total-amount').textContent = fmt(r.total);
+
+    // Boutons paiement si commande prête
+    const paySection = document.getElementById('order-pay-section');
+    paySection.style.display = r.status === 'ready' ? '' : 'none';
+    paySection.dataset.orderId = r.order_id;
+    paySection.dataset.amount  = r.total;
+
+  } catch(e) {
+    document.getElementById('order-loading').style.display = 'none';
+    document.getElementById('order-empty').style.display = '';
+  }
+}
+
+function refreshOrder() { loadOrder(); }
+
+async function initiatePayment(method) {
+  const section = document.getElementById('order-pay-section');
+  const orderId = section.dataset.orderId;
+  const amount  = section.dataset.amount;
+  const methods = { wave: 'Wave', orange_money: 'Orange Money', mtn_money: 'MTN Money' };
+  showToast(`Paiement ${methods[method]} initié...`);
+  // En prod : appel API paiement mobile money
+  // Pour l'instant rediriger vers le serveur
+  showToast('Contactez votre serveur pour finaliser');
+}
+
+// ─── MENU ─────────────────────────────────────────────────────
+let menuData = null;
+let activeCategory = null;
+
+async function loadMenu(estId) {
+  try {
+    const r = await api('GET', `/client/menu/${estId}`);
+    menuData = r;
+    document.getElementById('menu-resto-name').textContent = r.establishment?.name || '';
+
+    const tabs = document.getElementById('menu-cat-tabs');
+    tabs.innerHTML = r.menu.map((cat, i) => `
+      <div class="cat-tab ${i===0?'active':''}" onclick="showCategory(${cat.id})">${cat.name}</div>
+    `).join('');
+
+    if (r.menu.length) showCategory(r.menu[0].id);
+  } catch(e) {}
+}
+
+function showCategory(catId) {
+  activeCategory = catId;
+  document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+
+  if (!menuData) return;
+  const cat = menuData.menu.find(c => c.id === catId);
+  if (!cat) return;
+
+  // Highlight tab
+  const tabs = document.querySelectorAll('.cat-tab');
+  const idx = menuData.menu.findIndex(c => c.id === catId);
+  if (tabs[idx]) tabs[idx].classList.add('active');
+
+  const content = document.getElementById('menu-content');
+  content.innerHTML = `
+    <div class="card" style="margin:0 16px">
+      ${cat.products.map(p => `
+        <div class="menu-item">
+          <div>
+            <div class="menu-item-name">${p.name}</div>
+            ${p.description ? `<div class="menu-item-desc">${p.description}</div>` : ''}
+          </div>
+          <div class="menu-item-price">${fmt(p.price)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ─── LOYALTY ──────────────────────────────────────────────────
+async function loadLoyalty() {
+  try {
+    const r = await apiAuth('GET', '/client/loyalty');
+    const c = r.client;
+    document.getElementById('loyalty-pts').textContent = fmtPts(c.total_points);
+    document.getElementById('loyalty-spent').textContent = fmt(c.total_spent);
+    document.getElementById('loyalty-visits').textContent = c.visit_count;
+
+    const levelEl = document.getElementById('loyalty-level');
+    levelEl.textContent = c.level;
+    levelEl.className = `loyalty-level level-${c.level.toLowerCase()}`;
+
+    if (c.next_level_points) {
+      const pct = Math.min(100, (c.total_points / c.next_level_points) * 100);
+      document.getElementById('loyalty-progress').style.width = pct + '%';
+      document.getElementById('loyalty-progress-label').textContent =
+        `${c.total_points} / ${c.next_level_points} pts pour ${c.level === 'Starter' ? 'Bronze' : c.level === 'Bronze' ? 'Silver' : 'Gold'}`;
+    }
+
+    const txsEl = document.getElementById('loyalty-txs');
+    if (!r.transactions.length) {
+      txsEl.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-text">Aucune transaction</div></div>';
+    } else {
+      txsEl.innerHTML = r.transactions.map(t => `
+        <div class="tx-row">
+          <div>
+            <span class="tx-type tx-${t.type}">${t.type === 'earn' ? 'Gagné' : 'Utilisé'}</span>
+            <div class="tx-desc">${t.description || ''}</div>
+            <div class="tx-date">${t.date}</div>
+          </div>
+          <div class="tx-pts" style="color:${t.type==='earn'?'var(--green)':'var(--red)'}">
+            ${t.type==='earn'?'+':'−'}${t.points} pts
+          </div>
+        </div>
+      `).join('');
+    }
+  } catch(e) {}
+}
+
+// ─── PROFILE ──────────────────────────────────────────────────
+function loadProfile() {
+  document.getElementById('profile-phone').textContent = CLIENT_DATA?.phone || '';
+  document.getElementById('profile-name-input').value = CLIENT_DATA?.name || '';
+}
+
+async function saveProfile() {
+  const name = document.getElementById('profile-name-input').value.trim();
+  try {
+    await apiAuth('PATCH', '/client/profile', { name });
+    CLIENT_DATA = { ...CLIENT_DATA, name };
+    localStorage.setItem('sokora_client_data', JSON.stringify(CLIENT_DATA));
+    document.getElementById('home-greeting').textContent = `Bonjour ${name} 👋`;
+    showToast('Profil mis à jour ✓');
+  } catch(e) { showToast('Erreur sauvegarde'); }
+}
+
+function logout() {
+  localStorage.removeItem('sokora_client_token');
+  localStorage.removeItem('sokora_client_data');
+  localStorage.removeItem('sokora_current_est');
+  localStorage.removeItem('sokora_current_table');
+  CLIENT_TOKEN = ''; CLIENT_DATA = null;
+  document.getElementById('main-nav').style.display = 'none';
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-auth').classList.add('active');
+  showPhoneStep();
+  if (ORDER_POLL) clearInterval(ORDER_POLL);
+}
+
+// ─── API HELPERS ──────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function apiAuth(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json', 'X-Client-Token': CLIENT_TOKEN } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ─── TOAST ────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+
+// ─── QR WALLET ────────────────────────────────────────
+let qrInstance = null;
+
+async function showQRModal() {
+  // Générer QR data
+  const client = CLIENT_DATA;
+  if (!client) return;
+
+  const qrData = `SOKORA_WALLET:${client.id}:${client.phone}:${client.name || ''}`;
+
+  // Afficher modal
+  document.getElementById('modal-qr').style.display = 'flex';
+  document.getElementById('qr-name').textContent = client.name || client.phone;
+  document.getElementById('qr-phone').textContent = client.phone;
+  document.getElementById('qr-balance').textContent = fmt(walletData?.balance || 0);
+
+  // Générer QR code
+  const canvas = document.getElementById('qr-code-canvas');
+  canvas.innerHTML = '';
+  if (qrInstance) { qrInstance.clear(); }
+  qrInstance = new QRCode(canvas, {
+    text: qrData,
+    width: 200,
+    height: 200,
+    colorDark: '#1A2E4A',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M,
+  });
+
+  // Charger demandes pending
+  try {
+    const r = await apiAuth('GET', '/wallet/me');
+    if (r.pending_topups > 0) {
+      // Récupérer détail des demandes pending du client
+      const pending = r.transactions
+        ? [] // On affiche juste le compteur depuis wallet data
+        : [];
+      document.getElementById('qr-pending-section').style.display = '';
+      document.getElementById('qr-pending-list').innerHTML = `
+        <div class="qr-pending-item">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--navy)">${r.pending_topups} demande(s) en attente</div>
+            <div style="font-size:12px;color:var(--muted)">En attente de validation caissier</div>
+          </div>
+          <div style="font-size:14px;font-weight:800;color:var(--orange)">⏳</div>
+        </div>
+      `;
+    } else {
+      document.getElementById('qr-pending-section').style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+// ─── WALLET ───────────────────────────────────────────
+let walletData = null;
+let selectedMethod = 'wave';
+
+// Polling demandes de paiement (toutes les 8s quand sur onglet wallet)
+let payRequestsInterval = null;
+
+async function loadPaymentRequests() {
+  if (!clientToken) return;
+  try {
+    const r = await apiAuth('GET', '/wallet/payment-requests');
+    const list = r.requests || [];
+    const section = document.getElementById('pay-requests-section');
+    const listEl  = document.getElementById('pay-requests-list');
+    if (!list.length) { section.style.display = 'none'; return; }
+    section.style.display = '';
+    listEl.innerHTML = list.map(req => `
+      <div class="pay-request-card urgent" id="pay-req-${req.id}">
+        <div class="pay-request-header">
+          <div class="pay-request-restaurant">${req.establishment_name || 'Restaurant'}</div>
+          <div class="pay-request-amount">${fmt(req.amount)}</div>
+        </div>
+        <div class="pay-request-detail">
+          Table ${req.table_number || '?'} · Commande #${req.order_id}
+          · ${new Date(req.created_at).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})}
+        </div>
+        <div class="pay-request-actions">
+          <button class="btn-pay-reject" onclick="rejectPayRequest(${req.id})">✗ Refuser</button>
+          <button class="btn-pay-confirm" onclick="confirmPayRequest(${req.id}, ${req.amount})">
+            💚 Payer ${fmt(req.amount)}
+          </button>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+async function confirmPayRequest(requestId, amount) {
+  if (!confirm(`Confirmer le paiement de ${fmt(amount)} ?`)) return;
+  try {
+    await apiAuth('POST', `/wallet/payment-requests/${requestId}/confirm`);
+    showToast(`Paiement de ${fmt(amount)} confirmé ✓`);
+    loadWallet();
+    loadPaymentRequests();
+  } catch(e) { showToast(e.message || 'Erreur paiement'); }
+}
+
+async function rejectPayRequest(requestId) {
+  try {
+    await apiAuth('POST', `/wallet/payment-requests/${requestId}/reject`);
+    showToast('Demande refusée');
+    loadPaymentRequests();
+  } catch(e) {}
+}
+
+async function loadWallet() {
+  try {
+    walletData = await apiAuth('GET', '/wallet/me');
+    document.getElementById('wallet-balance').textContent = fmt(walletData.balance);
+    document.getElementById('wallet-loaded').textContent = fmt(walletData.total_loaded);
+    document.getElementById('wallet-cashback-total').textContent = fmt(walletData.total_cashback);
+    if (walletData.total_cashback > 0) {
+      document.getElementById('wallet-cashback-info').textContent = `dont ${fmt(walletData.total_cashback)} de cashback 🎉`;
+    }
+
+    const txsEl = document.getElementById('wallet-txs');
+    if (!walletData.transactions.length) {
+      txsEl.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-text">Aucune transaction</div></div>';
+    } else {
+      txsEl.innerHTML = walletData.transactions.map(t => `
+        <div class="tx-row">
+          <div>
+            <span class="badge" style="background:${t.color}22;color:${t.color};font-size:11px;padding:3px 8px">${t.label}</span>
+            <div class="tx-desc">${t.description || ''}</div>
+            <div class="tx-date">${t.date}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:16px;font-weight:800;color:${t.sign==='+' ? 'var(--green)' : 'var(--red)'}">
+              ${t.sign}${fmt(t.amount)}
+            </div>
+            <div style="font-size:11px;color:var(--muted)">${fmt(t.balance_after)}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+  } catch(e) {}
+}
+
+function showTopupModal() {
+  document.getElementById('modal-topup').style.display = 'flex';
+}
+
+function showPayModal() {
+  document.getElementById('pay-modal-balance').textContent = fmt(walletData?.balance || 0);
+  // Pré-remplir montant commande si en cours
+  if (CURRENT_TABLE && CURRENT_EST) {
+    api('GET', `/client/order/${CURRENT_EST.id}/${CURRENT_TABLE.id}`).then(r => {
+      if (r.has_order) {
+        document.getElementById('pay-order-info').style.display = '';
+        document.getElementById('pay-order-label').textContent = `Commande #${r.order_id}`;
+        document.getElementById('pay-order-amount').textContent = fmt(r.total);
+        document.getElementById('pay-amount').value = r.total;
+        document.getElementById('pay-modal-balance').dataset.orderId = r.order_id;
+        document.getElementById('pay-modal-balance').dataset.estId = CURRENT_EST.id;
+      }
+    }).catch(()=>{});
+  }
+  document.getElementById('modal-pay').style.display = 'flex';
+}
+
+function showTransferModal() {
+  document.getElementById('modal-transfer').style.display = 'flex';
+}
+
+function closeModal(name) {
+  document.getElementById(`modal-${name}`).style.display = 'none';
+}
+
+function setAmount(val) {
+  document.getElementById('topup-amount').value = val;
+}
+
+function selectMethod(method) {
+  selectedMethod = method;
+  document.querySelectorAll('.method-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById(`method-${method}`).classList.add('selected');
+  // Afficher/cacher champ téléphone
+  const needsPhone = ['wave','orange_money','mtn_money'].includes(method);
+  document.getElementById('topup-phone-wrap').style.display = needsPhone ? '' : 'none';
+}
+
+async function submitTopup() {
+  const amount = parseFloat(document.getElementById('topup-amount').value);
+  const phone  = document.getElementById('topup-phone').value.trim();
+  if (!amount || amount < 500) { showToast('Montant minimum 500 F'); return; }
+  const needsPhone = ['wave','orange_money','mtn_money'].includes(selectedMethod);
+  if (needsPhone && !phone) { showToast('Entrez votre numéro mobile money'); return; }
+
+  try {
+    const r = await apiAuth('POST', '/wallet/topup', {
+      amount, method: selectedMethod,
+      phone_used: phone || null,
+      establishment_id: CURRENT_EST?.id || null,
+    });
+    closeModal('topup');
+    showToast(r.message || 'Demande envoyée ✓');
+    loadWallet();
+  } catch(e) { showToast('Erreur lors de la demande'); }
+}
+
+async function submitWalletPay() {
+  const amount  = parseFloat(document.getElementById('pay-amount').value);
+  const balEl   = document.getElementById('pay-modal-balance');
+  const orderId = balEl.dataset.orderId || null;
+  const estId   = balEl.dataset.estId || CURRENT_EST?.id || null;
+  if (!amount || amount < 1) { showToast('Entrez un montant'); return; }
+
+  try {
+    const r = await apiAuth('POST', '/wallet/pay', {
+      amount, order_id: orderId ? parseInt(orderId) : null,
+      establishment_id: estId ? parseInt(estId) : null,
+    });
+    closeModal('pay');
+    showToast(`Payé ✓  Cashback: +${fmt(r.cashback)}`);
+    loadWallet();
+  } catch(e) { showToast(e.message || 'Solde insuffisant'); }
+}
+
+async function submitTransfer() {
+  const phone  = document.getElementById('transfer-phone').value.trim();
+  const amount = parseFloat(document.getElementById('transfer-amount').value);
+  if (!phone)  { showToast('Entrez le numéro du destinataire'); return; }
+  if (!amount || amount < 500) { showToast('Montant minimum 500 F'); return; }
+
+  try {
+    const r = await apiAuth('POST', '/wallet/transfer', { recipient_phone: phone, amount });
+    closeModal('transfer');
+    showToast(`Cadeau envoyé à ${r.recipient_name} ✓`);
+    loadWallet();
+  } catch(e) { showToast('Erreur transfert'); }
+}
+
+</script>
+
+<script>
+// ── PWA — Service Worker registration ────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then(reg => {
+        console.log('[SOKORA SW] enregistré', reg.scope);
+        reg.addEventListener('updatefound', () => {
+          const newSW = reg.installing;
+          newSW.addEventListener('statechange', () => {
+            if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+              // Nouvelle version disponible — notifier l'utilisateur
+              if (confirm('Une mise à jour SOKORA est disponible. Recharger ?')) {
+                newSW.postMessage('SKIP_WAITING');
+                window.location.reload();
+              }
+            }
+          });
+        });
+      })
+      .catch(err => console.warn('[SOKORA SW] erreur:', err));
+  });
+}
+
+// ── PWA — Bouton "Installer l'app" ───────────────────────
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Afficher le bouton d'installation si présent dans le DOM
+  const btn = document.getElementById('install-btn');
+  if (btn) btn.style.display = 'flex';
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredPrompt = null;
+  const btn = document.getElementById('install-btn');
+  if (btn) btn.style.display = 'none';
+  showToast('SOKORA installée ✓');
+});
+
+function installApp() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(choice => {
+    deferredPrompt = null;
+    if (choice.outcome === 'accepted') showToast('Installation en cours…');
+  });
+}
+</script>
+</body>
+</html>

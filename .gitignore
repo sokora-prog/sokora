@@ -1,0 +1,29 @@
+# Secrets
+.env
+.env.prod
+backend/.env
+frontend/.env
+hotel-dashboard/.env
+voyage-dashboard/.env
+
+# Node
+node_modules/
+dist/
+.expo/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Docker
+postgres_data/
+
+# Backups
+*.sql.gz
+backup_*.sql
+
+# OS
+.DS_Store
+Thumbs.db

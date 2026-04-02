@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="theme-color" content="#0f1e35"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <title>SOKORA — Cuisine KDS</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#0f1e35;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+    header{background:#0a1525;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.1);position:sticky;top:0;z-index:10}
+    .logo{font-size:22px;font-weight:900;letter-spacing:-1px;color:#ff6b00}
+    .logo span{color:#fff}
+    .status{display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(255,255,255,.5)}
+    .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .filters{display:flex;gap:8px;padding:14px 20px;background:#0a1525;border-bottom:1px solid rgba(255,255,255,.08);flex-wrap:wrap}
+    .filter-btn{padding:7px 16px;border-radius:20px;border:1.5px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.6);font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+    .filter-btn.active{background:#ff6b00;border-color:#ff6b00;color:#fff}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;padding:20px}
+    .card{border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:12px;transition:transform .2s;animation:fadeIn .3s ease}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    .card-open{background:#1a2a1a;border:2px solid #22c55e44}
+    .card-sent{background:#1a1a2e;border:2px solid #818cf844}
+    .card-urgent{background:#2a1a1a;border:2px solid #ef444444}
+    .card-ready{background:#0f2a1a;border:2px solid #22c55e88;opacity:.7}
+    .card-header{display:flex;align-items:center;justify-content:space-between}
+    .table-badge{background:#ff6b00;color:#fff;border-radius:10px;padding:5px 14px;font-size:20px;font-weight:900}
+    .table-badge.sent{background:#818cf8}
+    .cmd-info{font-size:12px;color:rgba(255,255,255,.45);margin-top:2px}
+    .urgency-badge{font-size:11px;padding:4px 10px;border-radius:20px;font-weight:700}
+    .urgent-red{background:rgba(239,68,68,.2);color:#f87171}
+    .urgent-yellow{background:rgba(251,191,36,.15);color:#fbbf24}
+    .urgent-green{background:rgba(34,197,94,.15);color:#4ade80}
+    .status-row{display:flex;align-items:center;justify-content:space-between}
+    .status-pill{font-size:11px;padding:4px 10px;border-radius:20px;font-weight:700}
+    .pill-sent{background:rgba(129,140,248,.2);color:#a5b4fc}
+    .pill-open{background:rgba(255,107,0,.15);color:#fb923c}
+    .pill-ready{background:rgba(34,197,94,.2);color:#4ade80}
+    .timer{font-size:12px;color:rgba(255,255,255,.4)}
+    .items{border-top:1px solid rgba(255,255,255,.08);padding-top:10px;display:flex;flex-direction:column;gap:7px}
+    .item-row{display:flex;align-items:center;gap:10px}
+    .qty{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;flex-shrink:0}
+    .qty-normal{background:rgba(255,107,0,.2);color:#fb923c}
+    .qty-gift{background:rgba(34,197,94,.2);color:#4ade80}
+    .item-name{font-size:14px;font-weight:600;flex:1}
+    .gift-tag{font-size:10px;background:rgba(34,197,94,.15);color:#4ade80;border-radius:6px;padding:2px 7px;font-weight:700}
+    .ready-btn{background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:12px;padding:12px;font-size:15px;font-weight:800;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity .2s}
+    .ready-btn:hover{opacity:.9}
+    .ready-btn:disabled{opacity:.5;cursor:default}
+    .done-banner{background:rgba(34,197,94,.1);border-radius:12px;padding:12px;text-align:center;font-size:13px;font-weight:700;color:#4ade80}
+    .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:60vh;gap:12px;color:rgba(255,255,255,.3)}
+    .empty-icon{font-size:72px}
+    .empty-title{font-size:20px;font-weight:800;color:rgba(255,255,255,.5)}
+    .login-overlay{position:fixed;inset:0;background:#0f1e35;display:flex;align-items:center;justify-content:center;z-index:100}
+    .login-card{background:#0a1525;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:40px 36px;width:360px;display:flex;flex-direction:column;gap:16px}
+    .login-title{font-size:26px;font-weight:900;color:#ff6b00;text-align:center;margin-bottom:4px}
+    .login-sub{font-size:13px;color:rgba(255,255,255,.4);text-align:center;margin-bottom:8px}
+    input{background:rgba(255,255,255,.07);border:1.5px solid rgba(255,255,255,.12);border-radius:10px;padding:12px 14px;color:#fff;font-size:14px;width:100%;outline:none;transition:border-color .2s}
+    input:focus{border-color:#ff6b00}
+    input::placeholder{color:rgba(255,255,255,.25)}
+    .login-btn{background:#ff6b00;color:#fff;border:none;border-radius:12px;padding:14px;font-size:16px;font-weight:800;cursor:pointer;width:100%;transition:opacity .2s}
+    .login-btn:hover{opacity:.9}
+    .err{color:#f87171;font-size:12px;text-align:center}
+    .counter{background:rgba(255,255,255,.08);border-radius:20px;padding:4px 12px;font-size:13px;font-weight:700;color:#fff}
+    .spinner{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .cfg-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;display:none;align-items:center;justify-content:center}
+    .cfg-overlay.open{display:flex}
+    .cfg-card{background:#0a1525;border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:32px;width:440px;max-width:95vw;display:flex;flex-direction:column;gap:16px}
+    .cfg-title{font-size:20px;font-weight:900;color:#ff6b00}
+    .cfg-sub{font-size:13px;color:rgba(255,255,255,.45);margin-top:-8px}
+    .tag-list{display:flex;flex-wrap:wrap;gap:8px;min-height:40px}
+    .tag{display:flex;align-items:center;gap:6px;background:rgba(255,107,0,.15);border:1.5px solid rgba(255,107,0,.4);border-radius:20px;padding:5px 12px;font-size:13px;font-weight:600;color:#fb923c}
+    .tag button{background:none;border:none;color:#fb923c;cursor:pointer;font-size:15px;line-height:1;padding:0}
+    .cfg-input-row{display:flex;gap:8px}
+    .cfg-input-row input{flex:1;margin:0}
+    .add-btn{background:#ff6b00;color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
+    .cfg-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
+    .btn-sec{background:rgba(255,255,255,.08);color:rgba(255,255,255,.7);border:none;border-radius:10px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer}
+    .btn-pri{background:#ff6b00;color:#fff;border:none;border-radius:10px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer}
+    .kitchen-badge{font-size:10px;background:rgba(129,140,248,.2);color:#a5b4fc;border-radius:6px;padding:2px 7px;font-weight:700}
+    .cfg-btn{background:rgba(255,255,255,.08);border:1.5px solid rgba(255,255,255,.12);border-radius:20px;padding:6px 14px;color:rgba(255,255,255,.6);font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+    .cfg-btn:hover{background:rgba(255,255,255,.15)}
+  </style>
+</head>
+<body>
+
+<div id="login-overlay" class="login-overlay">
+  <div class="login-card">
+    <div class="login-title">🍳 SOKORA KDS</div>
+    <div class="login-sub">Écran Cuisine — Connectez-vous</div>
+    <input id="l-phone" type="tel" placeholder="Téléphone (0700000000)"/>
+    <input id="l-pass"  type="password" placeholder="Mot de passe"/>
+    <div id="l-err" class="err"></div>
+    <button class="login-btn" onclick="doLogin()">Se connecter</button>
+  </div>
+</div>
+
+<header>
+  <div class="logo">SOKORA <span>KDS</span></div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span id="order-count" class="counter">0 commandes</span>
+    <button class="cfg-btn" onclick="openConfig()">⚙️ Catégories</button>
+    <div class="status"><div class="dot"></div><span id="last-refresh">—</span></div>
+  </div>
+</header>
+
+<!-- Config catégories cuisine -->
+<div id="cfg-overlay" class="cfg-overlay" onclick="e=>e.target===this&&closeConfig()">
+  <div class="cfg-card" onclick="event.stopPropagation()">
+    <div class="cfg-title">⚙️ Catégories cuisine</div>
+    <div class="cfg-sub">Seuls les articles de ces catégories seront affichés sur le KDS</div>
+    <div id="tag-list" class="tag-list"></div>
+    <div class="cfg-input-row">
+      <input id="cat-input" type="text" placeholder="Ex: Plats, Entrées, Grillades..." onkeydown="if(event.key==='Enter')addCat()"/>
+      <button class="add-btn" onclick="addCat()">+ Ajouter</button>
+    </div>
+    <div style="font-size:12px;color:rgba(255,255,255,.3)">💡 Laissez vide pour afficher toutes les commandes</div>
+    <div class="cfg-actions">
+      <button class="btn-sec" onclick="closeConfig()">Fermer</button>
+      <button class="btn-pri" onclick="saveConfig()">✅ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div class="filters">
+  <button class="filter-btn active" data-filter="all"   onclick="setFilter('all')">Toutes</button>
+  <button class="filter-btn"        data-filter="open"  onclick="setFilter('open')">⏳ En attente</button>
+  <button class="filter-btn"        data-filter="sent"  onclick="setFilter('sent')">🍳 En cuisine</button>
+  <button class="filter-btn"        data-filter="ready" onclick="setFilter('ready')">✅ Prêtes</button>
+</div>
+
+<div id="grid" class="grid"></div>
+
+<script>
+const API = 'http://10.208.146.43:8001';
+let token = localStorage.getItem('kds_token') || '';
+let currentFilter = 'all';
+let prevIds = new Set();
+let allOrders = [];
+let refreshInterval = null;
+let kitchenCats = JSON.parse(localStorage.getItem('kds_kitchen_cats') || '[]');
+
+// ── CONFIG CATÉGORIES ─────────────────────────────────────────────────────────
+function openConfig(){
+  renderTags();
+  document.getElementById('cfg-overlay').classList.add('open');
+}
+function closeConfig(){ document.getElementById('cfg-overlay').classList.remove('open'); }
+function renderTags(){
+  const list = document.getElementById('tag-list');
+  if(!kitchenCats.length){
+    list.innerHTML = '<span style="color:rgba(255,255,255,.3);font-size:13px">Aucune catégorie — toutes les commandes sont affichées</span>';
+    return;
+  }
+  list.innerHTML = kitchenCats.map(c=>`
+    <div class="tag">${c}<button onclick="removeCat('${c}')">×</button></div>
+  `).join('');
+}
+function addCat(){
+  const input = document.getElementById('cat-input');
+  const val = input.value.trim();
+  if(!val) return;
+  if(!kitchenCats.includes(val)) kitchenCats.push(val);
+  input.value = '';
+  renderTags();
+}
+function removeCat(c){
+  kitchenCats = kitchenCats.filter(x=>x!==c);
+  renderTags();
+}
+function saveConfig(){
+  localStorage.setItem('kds_kitchen_cats', JSON.stringify(kitchenCats));
+  closeConfig();
+  loadOrders();
+}
+
+// Filtre cuisine : garde uniquement les items dont la catégorie est dans kitchenCats
+function filterKitchenItems(orders){
+  if(!kitchenCats.length) return orders; // pas de filtre = tout afficher
+  return orders.map(o => ({
+    ...o,
+    items: o.items.filter(i => {
+      if(!i.category_name) return false;
+      return kitchenCats.some(c => i.category_name.toLowerCase().includes(c.toLowerCase()));
+    })
+  })).filter(o => o.items.length > 0); // exclure commandes sans articles cuisine
+}
+
+if(token) { document.getElementById('login-overlay').style.display='none'; startRefresh(); }
+
+async function doLogin(){
+  const phone = document.getElementById('l-phone').value.trim();
+  const pass  = document.getElementById('l-pass').value.trim();
+  document.getElementById('l-err').textContent = '';
+  try {
+    const res  = await fetch(`${API}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone_number: phone, password: pass })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail || 'Identifiants incorrects');
+    token = data.access_token;
+    localStorage.setItem('kds_token', token);
+    document.getElementById('login-overlay').style.display='none';
+    startRefresh();
+  } catch(e){ document.getElementById('l-err').textContent = typeof e.message === 'string' ? e.message : 'Erreur de connexion'; }
+}
+
+function setFilter(f){
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.toggle('active', b.dataset.filter===f));
+  renderOrders();
+}
+
+function elapsed(created_at){
+  if(!created_at) return '—';
+  const diff = Math.floor((Date.now() - new Date(created_at))/1000);
+  if(diff<60) return `${diff}s`;
+  return `${Math.floor(diff/60)}min ${diff%60}s`;
+}
+
+function urgency(created_at){
+  const diff = Math.floor((Date.now() - new Date(created_at))/1000/60);
+  if(diff>=15) return {cls:'card-urgent', badge:'🔴 Urgent',   badgeCls:'urgent-red'};
+  if(diff>=8)  return {cls:'card-sent',   badge:'🟡 Attente',  badgeCls:'urgent-yellow'};
+  return             {cls:'card-open',   badge:'🟢 Récent',   badgeCls:'urgent-green'};
+}
+
+function renderOrders(){
+  const kitchenFiltered = filterKitchenItems(allOrders);
+  const filtered = kitchenFiltered.filter(o=>{
+    if(currentFilter==='ready') return o.status==='ready';
+    if(currentFilter==='sent')  return o.status==='sent';
+    if(currentFilter==='open')  return o.status==='open';
+    return o.status !== 'ready';
+  });
+
+  document.getElementById('order-count').textContent = `${filtered.length} commande${filtered.length!==1?'s':''}`;
+  const grid = document.getElementById('grid');
+
+  if(!filtered.length){
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">👨‍🍳</div><div class="empty-title">Aucune commande</div><div>La cuisine est tranquille !</div></div>`;
+    return;
+  }
+
+  grid.innerHTML = filtered
+    .sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))
+    .map(o=>{
+      const urg = urgency(o.created_at);
+      const cardCls = o.status==='ready' ? 'card-ready' : urg.cls;
+      return `
+      <div class="card ${cardCls}">
+        <div class="card-header">
+          <div>
+            <div class="table-badge ${o.status==='sent'?'sent':''}">T${o.table_number}</div>
+            <div class="cmd-info">Cmd #${o.id} · ${o.table_label||'Salle'}</div>
+          </div>
+          <span class="urgency-badge ${urg.badgeCls}">${urg.badge}</span>
+        </div>
+        <div class="status-row">
+          <span class="status-pill ${o.status==='sent'?'pill-sent':o.status==='ready'?'pill-ready':'pill-open'}">
+            ${o.status==='sent'?'🍳 En cuisine':o.status==='ready'?'✅ Prête':'⏳ En attente'}
+          </span>
+          <span class="timer">⏱ ${elapsed(o.created_at)}</span>
+        </div>
+        <div class="items">
+          ${o.items.map(i=>`
+            <div class="item-row">
+              <div class="qty ${i.is_complimentary?'qty-gift':'qty-normal'}">${i.quantity}</div>
+              <span class="item-name">${i.product_name}</span>
+              ${i.is_complimentary?'<span class="gift-tag">🎁 Offert</span>':''}
+            </div>
+          `).join('')}
+        </div>
+        ${o.status!=='ready'
+          ? `<button class="ready-btn" onclick="markReady(${o.id}, this)">✅ Marquer prête</button>`
+          : `<div class="done-banner">✅ Prête — En attente du serveur</div>`
+        }
+      </div>`;
+    }).join('');
+}
+
+async function markReady(orderId, btn){
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    await fetch(`${API}/orders/${orderId}/ready`, { method:'PATCH', headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`} });
+    await loadOrders(true);
+  } catch { btn.disabled=false; btn.innerHTML='✅ Marquer prête'; }
+}
+
+async function loadOrders(silent=false){
+  try {
+    const res  = await fetch(`${API}/kds/orders?status=all`, { headers:{'Authorization':`Bearer ${token}`} });
+    if(res.status===401){ localStorage.removeItem('kds_token'); location.reload(); return; }
+    const data = await res.json();
+    allOrders  = Array.isArray(data) ? data : [];
+
+    // Son nouvelle commande
+    const newIds = new Set(allOrders.map(o=>o.id));
+    const hasNew = [...newIds].some(id=>!prevIds.has(id));
+    if(hasNew && prevIds.size>0) playBeep();
+    prevIds = newIds;
+
+    renderOrders();
+    document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  } catch {}
+}
+
+function playBeep(){
+  try {
+    const ctx  = new(window.AudioContext||window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(660, ctx.currentTime+0.15);
+    gain.gain.setValueAtTime(0.5, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.5);
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime+0.5);
+  } catch {}
+}
+
+function startRefresh(){
+  loadOrders();
+  refreshInterval = setInterval(loadOrders, 8000);
+  // Mise à jour des timers toutes les 10s sans recharger le réseau
+  setInterval(renderOrders, 10000);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+# ── Étape 1 : build du frontend React ────────────────────────
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ .
+
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=$VITE_API_URL
+
+RUN npm run build
+
+# ── Étape 2 : Nginx avec les fichiers statiques intégrés ─────
+FROM nginx:1.25-alpine
+
+# Copier les fichiers de config nginx
+COPY nginx/nginx.conf      /etc/nginx/nginx.conf
+COPY nginx/conf.d/         /etc/nginx/conf.d/
+
+# Script d'entrée : substitue SOKORA_DOMAIN → $DOMAIN
+COPY nginx/entrypoint.sh   /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Copier le build frontend
+COPY --from=frontend-builder /frontend/dist /usr/share/nginx/html
+
+EXPOSE 80 443
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]
