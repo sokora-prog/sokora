@@ -2,7 +2,9 @@
 SOKORA Voyage — Router FastAPI
 Endpoints : Compagnies, Véhicules, Chauffeurs, Trajets, Réservations, GPS, QR Embarquement
 """
-from typing import Optional
+import random
+import math
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -342,6 +344,147 @@ def company_dashboard(
     return crud_voyage.get_company_dashboard(db, company_id)
 
 
+@router.get("/trips/{trip_id}/bookings")
+def get_trip_bookings(
+    trip_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.require_manager)
+):
+    """Liste des passagers d'un voyage (admin compagnie)."""
+    from .models_voyage import VoyageBooking, BookingStatus
+
+    bookings = db.query(VoyageBooking).filter(
+        VoyageBooking.trip_id == trip_id
+    ).order_by(VoyageBooking.seat_number).all()
+
+    result = []
+    for b in bookings:
+        # passenger_name / passenger_phone sont des colonnes directes sur VoyageBooking
+        # On les complète avec la relation client si elles sont vides
+        client_name  = b.passenger_name  or "—"
+        client_phone = b.passenger_phone or "—"
+        if (client_name == "—" or client_phone == "—"):
+            try:
+                if b.client:
+                    if client_name == "—":
+                        client_name  = getattr(b.client, "full_name", None) \
+                                    or getattr(b.client, "name", None) or "—"
+                    if client_phone == "—":
+                        client_phone = getattr(b.client, "phone_number", None) \
+                                    or getattr(b.client, "phone", None) or "—"
+            except Exception:
+                pass
+
+        result.append({
+            "booking_id":     b.id,
+            "seat_number":    b.seat_number,
+            "status":         b.status.value if hasattr(b.status, "value") else str(b.status),
+            "client_name":    client_name,
+            "client_phone":   client_phone,
+            "amount_paid":    b.amount_paid or 0,
+            # payment_method n'existe pas dans le modèle — paiement toujours via WALLET
+            "payment_method": "WALLET",
+            "qr_token":       b.qr_token or "",
+            # boarded_at n'est pas une colonne du modèle — on utilise updated_at quand BOARDED
+            "boarded_at":     b.updated_at.isoformat()
+                              if b.updated_at and b.status == BookingStatus.BOARDED
+                              else None,
+            "created_at":     b.created_at.isoformat() if b.created_at else None,
+        })
+
+    return {"bookings": result, "total": len(result)}
+
+
+@router.get("/companies/{company_id}/drivers/{driver_id}/stats")
+def get_driver_stats(
+    company_id: int,
+    driver_id: int,
+    period: str = "30d",
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.require_manager)
+):
+    """Stats complètes d'un chauffeur sur une période."""
+    from datetime import datetime, timezone, timedelta
+    from collections import defaultdict
+    from .models_voyage import VoyageTrip, VoyageBooking, VoyageDriver, TripStatus, BookingStatus
+
+    driver = db.get(VoyageDriver, driver_id)
+    if not driver or driver.company_id != company_id:
+        raise HTTPException(404, "Chauffeur introuvable")
+
+    days = {"7d": 7, "30d": 30, "90d": 90}.get(period, 30)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    period_labels = {
+        "7d":  "7 derniers jours",
+        "30d": "30 derniers jours",
+        "90d": "90 derniers jours",
+    }
+
+    # Trips du chauffeur sur la période
+    trips = db.query(VoyageTrip).filter(
+        VoyageTrip.driver_id == driver_id,
+        VoyageTrip.departure_at >= since
+    ).all()
+
+    trip_ids = [t.id for t in trips]
+
+    completed   = [t for t in trips if t.status == TripStatus.COMPLETED]
+    cancelled   = [t for t in trips if t.status == TripStatus.CANCELLED]
+    active      = [t for t in trips if t.status in (TripStatus.BOARDING, TripStatus.IN_PROGRESS)]
+
+    # Passagers confirmés/embarqués/terminés et revenus
+    bookings = []
+    if trip_ids:
+        bookings = db.query(VoyageBooking).filter(
+            VoyageBooking.trip_id.in_(trip_ids),
+            VoyageBooking.status.in_([
+                BookingStatus.BOARDED,
+                BookingStatus.COMPLETED,
+                BookingStatus.CONFIRMED,
+            ])
+        ).all()
+
+    revenue = sum(b.amount_paid or 0 for b in bookings)
+
+    # KM estimés : utilise route.distance_km si disponible, sinon 150 km par défaut
+    km_total = 0
+    for t in completed:
+        try:
+            dist = t.route.distance_km if t.route and t.route.distance_km else 150
+        except Exception:
+            dist = 150
+        km_total += dist
+
+    # Série temporelle : nb de trips par jour
+    daily = defaultdict(int)
+    for t in trips:
+        if t.departure_at:
+            day_key = t.departure_at.strftime("%d/%m")
+            daily[day_key] += 1
+    daily_series = [{"date": k, "trips": v} for k, v in sorted(daily.items())]
+
+    return {
+        "driver_id":           driver.id,
+        "driver_name":         driver.full_name,
+        # phone est le nom réel de la colonne dans VoyageDriver
+        "driver_phone":        driver.phone or "—",
+        # license_no est le nom réel de la colonne dans VoyageDriver (pas license_number)
+        "driver_license":      driver.license_no or "—",
+        "period":              period,
+        "period_label":        period_labels.get(period, "30 derniers jours"),
+        "trips_total":         len(trips),
+        "trips_completed":     len(completed),
+        "trips_cancelled":     len(cancelled),
+        "trips_in_progress":   len(active),
+        "passengers_total":    len(bookings),
+        "revenue_generated":   revenue,
+        "km_estimated":        km_total,
+        "avg_punctuality_pct": 95.0,   # mock — pas de données de ponctualité en DB
+        "avg_rating":          4.3,    # mock — pas de colonne rating en DB
+        "daily_series":        daily_series,
+    }
+
+
 # ─────────────────────────────────────────────────────────────
 #  FINANCE AI — Score bancaire compagnie de voyage
 # ─────────────────────────────────────────────────────────────
@@ -509,3 +652,134 @@ def voyage_finance_dashboard(
         "loan_offers": loan_offers,
         "recommendations": recs,
     }
+
+
+# ─────────────────────────────────────────────────────────────
+#  POSITIONS GPS VÉHICULES (mock pour développement)
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/vehicles/positions")
+def get_vehicle_positions(
+    company_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(security.require_manager)
+):
+    """
+    Retourne les positions GPS des véhicules en voyage actif.
+    Pour le développement : positions mockées autour d'Abidjan.
+    is_mock: true indique que les données sont simulées.
+
+    Abidjan center: lat 5.3484, lng -4.0060
+    """
+    from .models_voyage import VoyageTrip, VoyageRoute, TripStatus, VoyageBooking, BookingStatus
+
+    # Récupérer les trips actifs (BOARDING ou IN_PROGRESS)
+    query = db.query(VoyageTrip).join(
+        VoyageRoute, VoyageTrip.route_id == VoyageRoute.id
+    ).filter(
+        VoyageTrip.status.in_([TripStatus.BOARDING, TripStatus.IN_PROGRESS])
+    )
+    if company_id:
+        query = query.filter(VoyageRoute.company_id == company_id)
+
+    active_trips = query.all()
+
+    positions = []
+    # Centre Abidjan + points autour sur les axes principaux
+    abidjan_routes = [
+        # Axe Abidjan → Yamoussoukro (nord)
+        [(5.3484, -4.0060), (5.8, -4.5), (6.5, -5.0), (6.8, -5.3)],
+        # Axe Abidjan → Bouaké
+        [(5.3484, -4.0060), (6.0, -4.2), (6.8, -4.5), (7.7, -5.0)],
+        # Axe Abidjan → San-Pédro (ouest)
+        [(5.3484, -4.0060), (5.1, -4.8), (4.9, -5.5), (4.7, -6.6)],
+        # Axe Abidjan → Grand-Bassam (est)
+        [(5.3484, -4.0060), (5.25, -3.7), (5.2, -3.5)],
+    ]
+
+    for i, trip in enumerate(active_trips):
+        route = abidjan_routes[i % len(abidjan_routes)]
+        # Simuler une progression sur la route selon l'heure
+        progress = random.uniform(0.1, 0.9)
+        route_idx = int(progress * (len(route) - 1))
+        base_lat, base_lng = route[min(route_idx, len(route) - 1)]
+
+        # Légère variation aléatoire (±0.01 degré ≈ ±1km)
+        lat = base_lat + random.uniform(-0.01, 0.01)
+        lng = base_lng + random.uniform(-0.01, 0.01)
+
+        # Compter passagers (bookings confirmés pour ce trip)
+        try:
+            passengers_count = db.query(VoyageBooking).filter(
+                VoyageBooking.trip_id == trip.id,
+                VoyageBooking.status.in_([BookingStatus.CONFIRMED, BookingStatus.BOARDED])
+            ).count()
+        except Exception:
+            passengers_count = random.randint(5, trip.seats_total or 30)
+
+        origin      = trip.route.origin      if trip.route else "?"
+        destination = trip.route.destination if trip.route else "?"
+        plate       = trip.vehicle.plate     if trip.vehicle else f"VH-{trip.vehicle_id}"
+
+        positions.append({
+            "trip_id": trip.id,
+            "vehicle_id": trip.vehicle_id,
+            "vehicle_plate": plate,
+            "route_name": f"{origin} → {destination}",
+            "origin": origin,
+            "destination": destination,
+            "status": trip.status.value,
+            "lat": round(lat, 6),
+            "lng": round(lng, 6),
+            "speed_kmh": random.randint(60, 110) if trip.status == TripStatus.IN_PROGRESS else 0,
+            "progress_pct": round(progress * 100, 1),
+            "passengers_aboard": passengers_count,
+            "total_seats": trip.seats_total or 30,
+            "departure_time": trip.departure_at.isoformat() if trip.departure_at else None,
+            "arrival_time": None,  # pas de champ arrival_time dans le modèle actuel
+            "is_mock": True
+        })
+
+    # Si aucun trip actif, retourner quelques positions demo pour l'UI
+    if not positions:
+        demo_positions = [
+            {
+                "trip_id": -1,
+                "vehicle_id": -1,
+                "vehicle_plate": "CI-2024-A1",
+                "route_name": "Abidjan → Yamoussoukro",
+                "origin": "Abidjan",
+                "destination": "Yamoussoukro",
+                "status": "IN_PROGRESS",
+                "lat": 5.8 + random.uniform(-0.05, 0.05),
+                "lng": -4.5 + random.uniform(-0.05, 0.05),
+                "speed_kmh": random.randint(70, 100),
+                "progress_pct": round(random.uniform(20, 80), 1),
+                "passengers_aboard": random.randint(10, 25),
+                "total_seats": 30,
+                "departure_time": None,
+                "arrival_time": None,
+                "is_mock": True
+            },
+            {
+                "trip_id": -2,
+                "vehicle_id": -2,
+                "vehicle_plate": "CI-2024-B2",
+                "route_name": "Abidjan → Grand-Bassam",
+                "origin": "Abidjan",
+                "destination": "Grand-Bassam",
+                "status": "BOARDING",
+                "lat": 5.25 + random.uniform(-0.02, 0.02),
+                "lng": -3.7 + random.uniform(-0.02, 0.02),
+                "speed_kmh": 0,
+                "progress_pct": round(random.uniform(5, 25), 1),
+                "passengers_aboard": random.randint(3, 15),
+                "total_seats": 22,
+                "departure_time": None,
+                "arrival_time": None,
+                "is_mock": True
+            }
+        ]
+        positions = demo_positions
+
+    return {"positions": positions, "count": len(positions), "is_mock": True}

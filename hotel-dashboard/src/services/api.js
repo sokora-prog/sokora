@@ -55,6 +55,8 @@ export const reservationApi = {
   checkin: (qr_code, lat, lng) => api.post('/hotel/checkin/scan', { qr_code, lat, lng }),
   checkout: (id) => api.post(`/hotel/reservations/${id}/checkout`),
   noShow:   (id) => api.post(`/hotel/reservations/${id}/no-show`),
+  update:   (id, data) => api.put(`/hotel/reservations/${id}`, data),
+  delete:   (id) => api.delete(`/hotel/reservations/${id}`),
 };
 
 export const seasonApi = {
@@ -76,6 +78,16 @@ export const transactionApi = {
 
 export const financeApi = {
   getHotelDashboard: (hotelId) => api.get(`/hotel/${hotelId}/finance/dashboard`),
+};
+
+export const loyaltyApi = {
+  dashboard:    ()           => api.get('/loyalty/dashboard'),
+  listClients:  (params)     => api.get('/loyalty/clients', { params }),
+  getClient:    (phone)      => api.get(`/loyalty/clients/${phone}`),
+  earn:         (data)       => api.post('/loyalty/earn', data),
+  redeem:       (data)       => api.post('/loyalty/redeem', data),
+  bonus:        (data)       => api.post('/loyalty/bonus', data),
+  transactions: (params)     => api.get('/loyalty/transactions', { params }),
 };
 
 export default api;

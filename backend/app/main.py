@@ -9,19 +9,25 @@ from . import models, schemas, crud, security
 from . import models_hotel    # Hotel module
 from . import models_voyage   # Voyage module
 from . import models_promo    # Promo / PULSE / Établissements
-from .router_hotel  import router as hotel_router
-from .router_voyage import router as voyage_router
-from .router_promo  import router as promo_router
-from .router_bar    import router as bar_router
+from . import models_service  # Services informels
+from .router_hotel    import router as hotel_router
+from .router_voyage   import router as voyage_router
+from .router_promo    import router as promo_router
+from .router_bar      import router as bar_router
+from .router_loyalty  import router as loyalty_router
+from .router_service  import router as service_router
 from .database import get_db, engine
 
 models.Base.metadata.create_all(bind=engine)
+models_service.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SOKORA API", version="3.0.0")
 app.include_router(hotel_router)
 app.include_router(voyage_router)
 app.include_router(promo_router)
 app.include_router(bar_router)
+app.include_router(loyalty_router)
+app.include_router(service_router)
 
 app.add_middleware(
     CORSMiddleware,

@@ -38,8 +38,25 @@ export const voyageApi = {
   updateTripStatus: (id, s)  => api.put(`/voyage/trips/${id}/status`, { status: s }),
   searchTrips:    (o, d, dt) => api.get('/voyage/search', { params: { origin: o, destination: d, date: dt } }),
   getTripDetail:  id         => api.get(`/voyage/trips/${id}`),
+
+  // Trip bookings (Feature 2 — liste passagers)
+  getTripBookings: (tripId)  => api.get(`/voyage/trips/${tripId}/bookings`),
+
+  // Driver stats
+  getDriverStats: (cid, did, period) => api.get(`/voyage/companies/${cid}/drivers/${did}/stats`, { params: { period } }),
+
+  // Vehicle positions (Feature 3 — tracking live)
+  getVehiclePositions: (companyId) => api.get('/voyage/vehicles/positions', { params: { company_id: companyId } }),
 };
 
 export const financeApi = {
   getCompanyDashboard: (companyId) => api.get(`/voyage/companies/${companyId}/finance/dashboard`),
+};
+
+export const loyaltyApi = {
+  dashboard:    ()       => api.get('/loyalty/dashboard'),
+  listClients:  (params) => api.get('/loyalty/clients', { params }),
+  earn:         (data)   => api.post('/loyalty/earn', data),
+  redeem:       (data)   => api.post('/loyalty/redeem', data),
+  transactions: (params) => api.get('/loyalty/transactions', { params }),
 };
