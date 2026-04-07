@@ -2199,13 +2199,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Inject global CSS
-  useEffect(() => {
-    const style = document.createElement('style');
-    style.textContent = GLOBAL_CSS;
-    document.head.appendChild(style);
-    return () => document.head.removeChild(style);
-  }, []);
+  // CSS injecté via JSX (synchrone, pas de flash au premier rendu)
 
   const handleLogout = () => {
     localStorage.removeItem('voyage_token');
@@ -2222,7 +2216,12 @@ export default function App() {
     setScreen('dashboard');
   };
 
-  if (!user) return <LoginScreen onLogin={u => setUser(u)} />;
+  if (!user) return (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: GLOBAL_CSS }} />
+      <LoginScreen onLogin={u => setUser(u)} />
+    </>
+  );
 
   const renderScreen = () => {
     switch (screen) {
@@ -2242,6 +2241,8 @@ export default function App() {
   };
 
   return (
+    <>
+    <style dangerouslySetInnerHTML={{ __html: GLOBAL_CSS }} />
     <div style={{ display: 'flex', minHeight: '100vh', background: C.bg }}>
       {/* ── SIDEBAR ── */}
       <div style={{
@@ -2330,5 +2331,6 @@ export default function App() {
         </div>
       </div>
     </div>
+    </>
   );
 }

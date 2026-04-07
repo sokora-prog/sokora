@@ -9,6 +9,71 @@ from . import models, models_hotel, models_voyage
 from .database import SessionLocal
 from .security import get_password_hash
 
+def _refresh_trips_if_expired(db, company_id):
+    """
+    Crée des trajets futurs pour une compagnie si tous ses trajets sont passés.
+    Appelé quand la compagnie existe déjà en base (evite les trajets expirés).
+    """
+    now = datetime.now(timezone.utc)
+    future_count = (
+        db.query(models_voyage.VoyageTrip)
+        .join(models_voyage.VoyageRoute)
+        .filter(
+            models_voyage.VoyageRoute.company_id == company_id,
+            models_voyage.VoyageTrip.departure_at >= now,
+            models_voyage.VoyageTrip.status.in_([
+                models_voyage.TripStatus.SCHEDULED,
+                models_voyage.TripStatus.BOARDING,
+            ])
+        )
+        .count()
+    )
+    if future_count > 0:
+        print(f"    {future_count} trajet(s) futur(s) trouvé(s) — aucun refresh nécessaire")
+        return
+
+    routes  = db.query(models_voyage.VoyageRoute).filter(
+        models_voyage.VoyageRoute.company_id == company_id,
+        models_voyage.VoyageRoute.is_active  == True
+    ).all()
+    vehicles = db.query(models_voyage.VoyageVehicle).filter(
+        models_voyage.VoyageVehicle.company_id == company_id,
+        models_voyage.VoyageVehicle.is_active  == True
+    ).all()
+    drivers = db.query(models_voyage.VoyageDriver).filter(
+        models_voyage.VoyageDriver.company_id == company_id,
+        models_voyage.VoyageDriver.is_active  == True
+    ).all()
+
+    if not (routes and vehicles and drivers):
+        print(f"    Manque routes/véhicules/chauffeurs — refresh ignoré")
+        return
+
+    driver = drivers[0]
+    created = 0
+    for i, route in enumerate(routes):
+        vehicle   = vehicles[i % len(vehicles)]
+        day_offset = (i // 2) + 1          # jours 1, 1, 2, 2, 3, …
+        hour       = 7 if (i % 2 == 0) else 14
+        dep = (now + timedelta(days=day_offset)).replace(
+            hour=hour, minute=0, second=0, microsecond=0
+        )
+        trip = models_voyage.VoyageTrip(
+            route_id=route.id, vehicle_id=vehicle.id, driver_id=driver.id,
+            departure_at=dep, price=route.base_price, seats_total=vehicle.seat_count,
+            seats_booked=0, status=models_voyage.TripStatus.SCHEDULED,
+        )
+        db.add(trip)
+        db.flush()
+        for sn in range(1, vehicle.seat_count + 1):
+            db.add(models_voyage.VoyageTripSeat(
+                trip_id=trip.id, seat_number=sn,
+                status=models_voyage.SeatStatus.FREE,
+            ))
+        created += 1
+    print(f"    {created} trajet(s) créé(s) pour compagnie {company_id}")
+
+
 def run():
     db = SessionLocal()
     try:
@@ -271,6 +336,7 @@ def run():
             print(f"    Created 3 trips for {c1.name}")
         else:
             print(f"  Company exists: {c1.name}")
+            _refresh_trips_if_expired(db, c1.id)
 
         c2 = db.query(models_voyage.VoyageCompany).filter(
             models_voyage.VoyageCompany.name == "Côte Sud Voyages"
@@ -336,6 +402,7 @@ def run():
             print(f"    Created 2 trips for {c2.name}")
         else:
             print(f"  Company exists: {c2.name}")
+            _refresh_trips_if_expired(db, c2.id)
 
         db.commit()
         print("\n=== Seed hotels & voyages terminé ===")

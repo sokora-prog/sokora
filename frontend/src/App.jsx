@@ -2877,6 +2877,9 @@ function Dashboard() {
           <strong>{user?.full_name||"Gérant"}</strong>
           <p>{user?.phone_number}</p>
           <span className="trial">v Trial actif</span>
+          <button onClick={logout} style={{marginTop:10,width:"100%",display:"flex",alignItems:"center",gap:6,padding:"8px 10px",borderRadius:8,border:"none",background:"rgba(232,64,64,.12)",color:"#e84040",cursor:"pointer",fontSize:12,fontWeight:600}}>
+            <Ic n="logout" sz={13} col="#e84040"/>Déconnexion
+          </button>
         </div>
       </aside>
       <main className="main">

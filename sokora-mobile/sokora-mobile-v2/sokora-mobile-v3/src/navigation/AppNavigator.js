@@ -57,6 +57,9 @@ import LoyaltyScreen             from '../screens/client/LoyaltyScreen';
 // ── CHAUFFEUR ────────────────────────────────────────────────────────────────
 import DriverScanScreen from '../screens/driver/DriverScanScreen';
 
+// ── HÔTEL ─────────────────────────────────────────────────────────────────────
+import ReceptionScreen from '../screens/hotel/ReceptionScreen';
+
 const Stack = createStackNavigator();
 const Tab   = createBottomTabNavigator();
 
@@ -416,6 +419,31 @@ function DriverScanStack() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// 🏨 NAVIGATION RÉCEPTION HÔTEL
+// ════════════════════════════════════════════════════════════════════════════
+
+function HotelTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarActiveTintColor: Colors.teal,
+        tabBarInactiveTintColor: Colors.textFaint,
+        tabBarStyle: { backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border, height: 64, paddingBottom: 10, paddingTop: 8, ...Shadow.md },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarIcon: ({ focused, color }) => {
+          const icons = { 'Accueil': focused ? 'home' : 'home-outline', 'Mon profil': focused ? 'person' : 'person-outline' };
+          return <Ionicons name={icons[route.name] || 'ellipse'} size={22} color={color} />;
+        },
+      })}
+    >
+      <Tab.Screen name="Accueil"    component={ReceptionScreen} />
+      <Tab.Screen name="Mon profil" component={WaiterStatsScreen} />
+    </Tab.Navigator>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // 🏢 NAVIGATION MANAGER (inclut accès client + waiter + admin)
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -451,11 +479,14 @@ export default function AppNavigator() {
   // ── Routage par rôle (normalise majuscules/minuscules) ──
   const renderNav = () => {
     const role = (user.role || '').toLowerCase();
+    const estType = (user.establishment_type || '').toLowerCase();
     switch (role) {
       case 'super_admin':
       case 'manager':
         return <ManagerTabs />;
       case 'waiter':
+        // Le personnel d'un hôtel voit l'interface réception, pas restaurant
+        if (estType === 'hotel') return <HotelTabs />;
         return <WaiterTabs />;
       case 'driver':
         return <DriverTabs />;
