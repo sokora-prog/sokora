@@ -21,6 +21,8 @@ def register_manager(db: Session, data: schemas.ManagerRegister) -> models.User:
         name=data.establishment_name,
         address=data.establishment_address,
         phone=data.establishment_phone,
+        type=data.establishment_type or "maquis",
+        city=data.establishment_city,
     )
     db.add(establishment)
     db.flush()  # pour obtenir l'id
@@ -1265,13 +1267,15 @@ def request_topup(db: Session, client_id: int, amount: float, method: str,
 
 
 def confirm_topup(db: Session, topup_id: int, confirmed_by: int, est_id: int) -> dict:
-    topup = db.get(models.WalletTopup, topup_id)
+    topup = db.get(models.WalletTopup, topup_id, with_for_update=True)
     if not topup or topup.establishment_id != est_id:
         return {"error": "Recharge introuvable"}
     if topup.status != "pending":
         return {"error": "Recharge déjà traitée"}
     wallet = db.scalars(
-        select(models.WalletAccount).where(models.WalletAccount.client_id == topup.client_id)
+        select(models.WalletAccount)
+        .where(models.WalletAccount.client_id == topup.client_id)
+        .with_for_update()
     ).first()
     if not wallet:
         wallet = models.WalletAccount(client_id=topup.client_id, balance=0.0, total_loaded=0.0)
@@ -1318,16 +1322,22 @@ def get_pending_topups(db: Session, est_id: int) -> list:
 
 def pay_with_wallet(db: Session, client_id: int, order_id: int,
                     est_id: int, amount: float) -> dict:
+    # Verrouillage ligne wallet pour éviter les doubles débits concurrents
     wallet = db.scalars(
-        select(models.WalletAccount).where(models.WalletAccount.client_id == client_id)
+        select(models.WalletAccount)
+        .where(models.WalletAccount.client_id == client_id)
+        .with_for_update()
     ).first()
     if not wallet:
         return {"error": "Wallet introuvable"}
     if wallet.balance < amount:
         return {"error": f"Solde insuffisant. Solde: {wallet.balance}"}
-    order = db.get(models.Order, order_id)
+    order = db.get(models.Order, order_id, with_for_update=True)
     if not order or order.establishment_id != est_id:
         return {"error": "Commande introuvable"}
+    # Idempotence : si commande déjà payée, retourner succès sans redébiter
+    if order.status == models.OrderStatus.PAID:
+        return {"success": True, "new_balance": wallet.balance, "already_paid": True}
     balance_before   = wallet.balance
     wallet.balance  -= amount
     order.status     = models.OrderStatus.PAID
@@ -1335,7 +1345,7 @@ def pay_with_wallet(db: Session, client_id: int, order_id: int,
         order.table.status = models.TableStatus.FREE
     payment = models.Payment(
         order_id=order_id, establishment_id=est_id,
-        amount=amount, method=models.PaymentMethod.MOBILE,
+        amount=amount, method=models.PaymentMethod.WALLET,
     )
     db.add(payment)
     tx = models.WalletTransaction(
@@ -1352,8 +1362,11 @@ def transfer_wallet(db: Session, from_client_id: int, recipient_phone: str,
                     amount: float) -> dict:
     if amount <= 0:
         return {"error": "Montant invalide"}
+    # Verrouillage du wallet émetteur avant tout calcul
     from_wallet = db.scalars(
-        select(models.WalletAccount).where(models.WalletAccount.client_id == from_client_id)
+        select(models.WalletAccount)
+        .where(models.WalletAccount.client_id == from_client_id)
+        .with_for_update()
     ).first()
     if not from_wallet or from_wallet.balance < amount:
         return {"error": "Solde insuffisant"}
@@ -1363,7 +1376,9 @@ def transfer_wallet(db: Session, from_client_id: int, recipient_phone: str,
     if not recipient:
         return {"error": "Destinataire introuvable"}
     to_wallet = db.scalars(
-        select(models.WalletAccount).where(models.WalletAccount.client_id == recipient.id)
+        select(models.WalletAccount)
+        .where(models.WalletAccount.client_id == recipient.id)
+        .with_for_update()
     ).first()
     if not to_wallet:
         to_wallet = models.WalletAccount(client_id=recipient.id, balance=0.0, total_loaded=0.0)

@@ -461,6 +461,89 @@ function RevenueByMethodChart() {
   );
 }
 
+// ── VOICE ASSISTANT ────────────────────────────────────────────────────────────
+function VoiceAssistant({ screen }) {
+  const [active, setActive] = React.useState(false);
+  const [listening, setListening] = React.useState(false);
+  const recognRef = React.useRef(null);
+
+  const SCREEN_LABELS = {
+    dashboard:"Tableau de bord", caisse:"Suivi Caisse", kds:"Cuisine",
+    pos:"Caisse Rapide", menu:"Menu et Produits", stock:"Stock",
+    wallet:"Wallet", waiters:"Équipe", expenses:"Dépenses",
+    orders:"Commandes", ardoise:"Ardoise", finance:"Finance IA", admin:"Super Admin",
+  };
+
+  const speak = (text) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "fr-FR"; u.rate = 1.05;
+    // Choisir une voix française si disponible
+    const voices = window.speechSynthesis.getVoices();
+    const fr = voices.find(v => v.lang.startsWith("fr"));
+    if (fr) u.voice = fr;
+    window.speechSynthesis.speak(u);
+  };
+
+  const startListening = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { speak("La reconnaissance vocale n'est pas disponible sur ce navigateur."); return; }
+    const r = new SR();
+    r.lang = "fr-FR"; r.interimResults = false; r.maxAlternatives = 1;
+    recognRef.current = r;
+    r.onstart = () => setListening(true);
+    r.onend   = () => setListening(false);
+    r.onerror = () => setListening(false);
+    r.onresult = (e) => {
+      const cmd = e.results[0][0].transcript.toLowerCase();
+      speak(`Commande reçue : ${e.results[0][0].transcript}`);
+    };
+    r.start();
+  };
+
+  const toggle = () => {
+    if (active) {
+      window.speechSynthesis?.cancel();
+      recognRef.current?.abort();
+      setActive(false); setListening(false);
+    } else {
+      setActive(true);
+      const label = SCREEN_LABELS[screen] || screen;
+      speak(`SOKORA. Vous êtes sur la page ${label}. Appuyez à nouveau pour une commande vocale.`);
+    }
+  };
+
+  const handleMic = (e) => {
+    e.stopPropagation();
+    if (listening) { recognRef.current?.stop(); }
+    else { startListening(); }
+  };
+
+  return (
+    <div style={{position:"fixed",bottom:24,right:24,zIndex:999,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:8}}>
+      {active && (
+        <button onClick={handleMic} title={listening?"Arrêter l'écoute":"Parler"} style={{
+          width:42,height:42,borderRadius:"50%",border:"none",cursor:"pointer",
+          background:listening?"#e84040":C.teal,color:"#fff",
+          display:"flex",alignItems:"center",justifyContent:"center",
+          boxShadow:"0 4px 12px rgba(0,0,0,.25)",fontSize:18,
+          animation:listening?"pulse-ring 1.2s ease infinite":"none",
+        }}>🎤</button>
+      )}
+      <button onClick={toggle} title="Assistant vocal SOKORA" style={{
+        width:52,height:52,borderRadius:"50%",border:"none",cursor:"pointer",
+        background:active?C.orange:C.navy,color:"#fff",
+        display:"flex",alignItems:"center",justifyContent:"center",
+        boxShadow:`0 4px 16px ${active?C.orange+"80":"rgba(0,0,0,.3)"}`,
+        fontSize:22,transition:"all .2s",
+        transform:active?"scale(1.1)":"scale(1)",
+      }}>🔊</button>
+      {listening&&<div style={{background:C.navy,color:"#fff",fontSize:11,fontWeight:600,borderRadius:20,padding:"4px 10px",whiteSpace:"nowrap"}}>En écoute...</div>}
+    </div>
+  );
+}
+
 // ── SCREENS ────────────────────────────────────────────────────────────────────
 
 function DashboardScreen() {
@@ -2662,7 +2745,8 @@ function RegisterPage({ onBack }) {
   const [error, setError] = useState("");
   const [form, setForm] = useState({
     full_name:"", phone_number:"", password:"", password2:"",
-    establishment_name:"", establishment_address:"", establishment_phone:""
+    establishment_name:"", establishment_address:"", establishment_phone:"",
+    establishment_type:"maquis", establishment_city:""
   });
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
@@ -2684,6 +2768,8 @@ function RegisterPage({ onBack }) {
         establishment_name: form.establishment_name,
         establishment_address: form.establishment_address||undefined,
         establishment_phone: form.establishment_phone||undefined,
+        establishment_type: form.establishment_type||"maquis",
+        establishment_city: form.establishment_city||undefined,
       }));
       // Stocker le token + user directement
       localStorage.setItem("sokora_token", data.access_token);
@@ -2735,7 +2821,28 @@ function RegisterPage({ onBack }) {
         </>}
 
         {step===2&&<>
+          <div className="ig" style={{marginBottom:12}}>
+            <label>Type d’établissement</label>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:6}}>
+              {[
+                {k:"maquis",    label:"🍖 Maquis"},
+                {k:"bar",       label:"🍺 Bar / Club"},
+                {k:"restaurant",label:"🍽️ Restaurant"},
+                {k:"hotel",     label:"🏨 Hôtel"},
+                {k:"voyage",    label:"🚌 Transport / Voyage"},
+              ].map(t=>(
+                <div key={t.k} onClick={()=>set("establishment_type",t.k)} style={{
+                  padding:"10px 12px",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:600,
+                  border:`2px solid ${form.establishment_type===t.k?C.orange:C.border}`,
+                  background:form.establishment_type===t.k?C.orange+"15":C.bg,
+                  color:form.establishment_type===t.k?C.orange:C.text,
+                  textAlign:"center",transition:"all .15s",
+                }}>{t.label}</div>
+              ))}
+            </div>
+          </div>
           <F label="Nom de l’établissement" k="establishment_name" placeholder="Restaurant Le Baobab"/>
+          <F label="Ville" k="establishment_city" placeholder="Abidjan, Bouaké..."/>
           <F label="Adresse (optionnel)" k="establishment_address" placeholder="Rue des Jardins, Abidjan"/>
           <F label="Téléphone établissement (optionnel)" type="tel" k="establishment_phone" placeholder="0700000000"/>
           <div style={{display:"flex",gap:10,marginTop:8}}>
@@ -2895,6 +3002,7 @@ function Dashboard() {
           <Comp/>
         </div>
       </main>
+      <VoiceAssistant screen={screen}/>
     </div>
   );
 }

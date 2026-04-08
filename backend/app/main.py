@@ -145,35 +145,22 @@ def register_manager(data: schemas.ManagerRegister, db: Session = Depends(get_db
 
 @app.post("/auth/login", response_model=schemas.Token, tags=["auth"])
 def login(data: schemas.UserLogin, db: Session = Depends(get_db)):
-    # Debug logging (à retirer en production)
-    print(f"[LOGIN ATTEMPT] Phone: {data.phone_number}")
-
     # Nettoyage du numéro de téléphone
     phone_clean = data.phone_number.strip().replace(" ", "").replace("-", "")
-    print(f"[LOGIN ATTEMPT] Cleaned phone: {phone_clean}")
 
     user = db.query(models.User).filter(models.User.phone_number == phone_clean).first()
 
     if not user:
-        print(f"[LOGIN ERROR] User not found: {phone_clean}")
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
 
-    print(f"[LOGIN ATTEMPT] User found: ID={user.id}, Active={user.is_active}")
-
     # Vérification du mot de passe
-    password_valid = security.verify_password(data.password, user.password_hash)
-    print(f"[LOGIN ATTEMPT] Password valid: {password_valid}")
-
-    if not password_valid:
-        print(f"[LOGIN ERROR] Invalid password for user: {phone_clean}")
+    if not security.verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
 
     if not user.is_active:
-        print(f"[LOGIN ERROR] Account disabled: {phone_clean}")
         raise HTTPException(status_code=403, detail="Compte désactivé")
 
     token = security.create_access_token({"sub": str(user.id)})
-    print(f"[LOGIN SUCCESS] Token created for user: {phone_clean}")
 
     # Enrichir avec infos établissement
     est_name = None

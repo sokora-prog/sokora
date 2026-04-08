@@ -60,6 +60,9 @@ import DriverScanScreen from '../screens/driver/DriverScanScreen';
 // ── HÔTEL ─────────────────────────────────────────────────────────────────────
 import ReceptionScreen from '../screens/hotel/ReceptionScreen';
 
+// ── ARTISAN ───────────────────────────────────────────────────────────────────
+import ArtisanHomeScreen from '../screens/artisan/ArtisanHomeScreen';
+
 const Stack = createStackNavigator();
 const Tab   = createBottomTabNavigator();
 
@@ -444,6 +447,34 @@ function HotelTabs() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// 🔨 NAVIGATION ARTISAN
+// ════════════════════════════════════════════════════════════════════════════
+
+function ArtisanTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarActiveTintColor: Colors.purple || '#6366f1',
+        tabBarInactiveTintColor: Colors.textFaint,
+        tabBarStyle: { backgroundColor: Colors.surface, borderTopWidth: 1, borderTopColor: Colors.border, height: 64, paddingBottom: 10, paddingTop: 8, ...Shadow.md },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarIcon: ({ focused, color }) => {
+          const icons = {
+            'Accueil':    focused ? 'construct'    : 'construct-outline',
+            'Mon profil': focused ? 'person'        : 'person-outline',
+          };
+          return <Ionicons name={icons[route.name] || 'ellipse'} size={22} color={color} />;
+        },
+      })}
+    >
+      <Tab.Screen name="Accueil"    component={ArtisanHomeScreen} />
+      <Tab.Screen name="Mon profil" component={WaiterStatsScreen} />
+    </Tab.Navigator>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // 🏢 NAVIGATION MANAGER (inclut accès client + waiter + admin)
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -490,6 +521,8 @@ export default function AppNavigator() {
         return <WaiterTabs />;
       case 'driver':
         return <DriverTabs />;
+      case 'artisan':
+        return <ArtisanTabs />;
       case 'client':
       default:
         return <ClientTabs />;

@@ -88,6 +88,8 @@ class ManagerRegister(BaseModel):
     establishment_name: str
     establishment_address: Optional[str] = None
     establishment_phone: Optional[str] = None
+    establishment_type: Optional[str] = "maquis"  # maquis, bar, restaurant, hotel, voyage
+    establishment_city: Optional[str] = None
 
 
 # ─────────────────────────────────────────
