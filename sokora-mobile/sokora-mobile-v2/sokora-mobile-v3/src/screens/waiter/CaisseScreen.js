@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { dashboardService } from '../../services/api';
 import { Colors, Spacing, Radius, Typography } from '../../utils/constants';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const fmt = n => new Intl.NumberFormat('fr-FR').format(n ?? 0) + ' F';
 
@@ -76,13 +77,7 @@ export default function CaisseScreen({ navigation }) {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.teal} />}
     >
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={20} color={Colors.navy} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Suivi caisse</Text>
-        <View style={{ width: 36 }} />
-      </View>
+      <ScreenHeader navigation={navigation} title="Caisse" dark={true} />
 
       {/* Tabs période */}
       <View style={styles.tabRow}>

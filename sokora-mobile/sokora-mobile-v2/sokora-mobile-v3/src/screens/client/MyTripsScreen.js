@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { API_URL } from '../../utils/constants';
 import { useTranslation } from '../../services/i18n';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const B = {
   orange:'#F26D21', navy:'#1A2E4A', bg:'#F2F5FB',
@@ -71,17 +72,13 @@ export default function MyTripsScreen({ navigation }) {
   return (
     <View style={s.root}>
       {/* Nav */}
-      <View style={s.nav}>
-        {navigation && (
-          <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
-          </TouchableOpacity>
-        )}
-        <Text style={s.navTitle}>{t('voyage.my_trips')}</Text>
-        <TouchableOpacity onPress={load} style={s.backBtn}>
-          <Ionicons name="refresh" size={20} color="#fff" />
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="Mes voyages"
+        dark={true}
+        rightIcon="refresh"
+        onRightPress={load}
+      />
 
       {loading ? (
         <ActivityIndicator color={B.orange} style={{ flex: 1 }} size="large" />

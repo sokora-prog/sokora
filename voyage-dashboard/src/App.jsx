@@ -47,6 +47,15 @@ const VEHICLE_TYPE = {
   SHARED:  '🚕 Taxi brousse',
 };
 
+const CI_CITIES = [
+  'Abidjan','Yamoussoukro','Bouaké','Daloa','San-Pédro','Korhogo','Man','Gagnoa',
+  'Abengourou','Divo','Soubré','Odienné','Bondoukou','Séguéla','Ferkessédougou',
+  'Katiola','Aboisso','Adzopé','Agboville','Anyama','Bingerville','Grand-Bassam',
+  'Grand-Lahou','Guiglo','Issia','Jacqueville','Lakota','Sassandra','Tiassalé',
+  'Toumodi','Vavoua','Zuénoula','Tabou','Boundiali','Tengréla','Bouna','Dabou',
+  'Duekoué','Sinfra','Oumé','Dimbokro','Bongouanou',
+];
+
 const fmt     = n  => new Intl.NumberFormat('fr-FR').format(n ?? 0) + ' F';
 const fmtDate = d  => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const fmtTime = d  => d ? new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
@@ -184,60 +193,101 @@ function Spinner() {
    LOGIN SCREEN
 ═══════════════════════════════════════════════════════════════ */
 function LoginScreen({ onLogin }) {
-  const [form, setForm]   = useState({ phone_number: '', password: '' });
-  const [err, setErr]     = useState('');
-  const [loading, setLoading] = useState(false);
+  const [phone, setPhone]       = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [err, setErr]           = useState('');
 
-  const handleSubmit = async e => {
-    e.preventDefault();
+  const inputStyle = { width:'100%', padding:'12px 14px', borderRadius:10, background:'#0b1829', border:`1.5px solid ${C.border}`, color:C.white, fontSize:14, outline:'none', fontFamily:'inherit', transition:'border-color .2s', boxSizing:'border-box' };
+  const btnStyle = ok => ({ width:'100%', padding:'13px 20px', borderRadius:10, border:'none', background: ok ? `linear-gradient(135deg, ${C.orange}, ${C.orangeHov})` : `${C.orange}55`, color:'#fff', fontWeight:800, fontSize:14, cursor: ok ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:8 });
+
+  const handleLogin = async () => {
+    if (!phone || !password) return;
     setLoading(true); setErr('');
     try {
-      const { data } = await authApi.login(form);
+      const { data } = await authApi.login({ phone_number: phone, password });
       localStorage.setItem('voyage_token', data.access_token);
       localStorage.setItem('voyage_user', JSON.stringify(data.user));
-      // Bug #4 : persister company_id dès le login si présent dans la réponse
-      if (data.user?.company_id) {
-        localStorage.setItem('voyage_company_id', data.user.company_id);
-      }
+      if (data.user?.company_id) localStorage.setItem('voyage_company_id', data.user.company_id);
       onLogin(data.user);
-    } catch {
-      setErr('Identifiants incorrects');
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) {
+      setErr(e.response?.data?.detail || 'Numéro ou mot de passe incorrect');
+    } finally { setLoading(false); }
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg, padding: 20 }}>
-      <div style={{ width: '100%', maxWidth: 400 }}>
-        {/* Logo */}
-        <div style={{ textAlign: 'center', marginBottom: 40 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 64, height: 64, borderRadius: 16, background: C.orange, marginBottom: 12, fontSize: 32 }}>🚌</div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: C.white, letterSpacing: -1 }}>
-            S<span style={{ color: C.orange }}>O</span>KORA
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', position: 'relative', overflow: 'hidden' }}>
+
+      {/* ── Panneau gauche décoratif ── */}
+      <div style={{
+        width: '45%',
+        background: 'linear-gradient(160deg, #1a0f00 0%, #0f1e35 100%)',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        padding: '60px 50px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        <div style={{ position: 'absolute', top: -80, right: -80, width: 300, height: 300, borderRadius: '50%', background: `${C.orange}15`, border: `1px solid ${C.orange}22` }} />
+        <div style={{ position: 'absolute', bottom: -60, left: -60, width: 200, height: 200, borderRadius: '50%', background: `${C.teal}10` }} />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 48 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: C.orange, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, flexShrink: 0 }}>🚌</div>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: C.white, letterSpacing: '-0.5px', lineHeight: 1 }}>
+              SOKORA<span style={{ color: C.orange }}>.</span>
+            </div>
+            <div style={{ fontSize: 10, color: C.orange, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', marginTop: 2 }}>VOYAGE</div>
           </div>
-          <div style={{ fontSize: 11, color: C.orange, marginTop: 4, letterSpacing: 2, textTransform: 'uppercase', fontWeight: 700 }}>VOYAGES &amp; TRANSPORT</div>
         </div>
 
-        <div className="card" style={{ padding: 32 }}>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="form-group">
-              <label className="form-label">Téléphone</label>
-              <input className="input" type="tel" placeholder="0700000000"
-                value={form.phone_number}
-                onChange={e => setForm(f => ({ ...f, phone_number: e.target.value }))} required />
+        <h1 style={{ fontSize: 30, fontWeight: 800, color: C.white, lineHeight: 1.25, marginBottom: 16 }}>
+          Gérez vos trajets<br />
+          <span style={{ color: C.orange }}>interurbains</span>
+        </h1>
+        <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.75 }}>
+          Compagnies, voyages, réservations et suivi de flotte — tout en un seul tableau de bord.
+        </p>
+
+        <div style={{ marginTop: 40, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {['Paiement Wallet SOKORA sécurisé', 'Gestion flotte & chauffeurs', 'Tracking GPS temps réel'].map(f => (
+            <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 22, height: 22, borderRadius: '50%', background: C.orange, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>✓</div>
+              <span style={{ fontSize: 13, color: C.muted }}>{f}</span>
             </div>
-            <div className="form-group">
-              <label className="form-label">Mot de passe</label>
-              <input className="input" type="password" placeholder="••••••••"
-                value={form.password}
-                onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required />
-            </div>
-            {err && <div style={{ color: C.red, fontSize: 13, textAlign: 'center', background: C.redPale, padding: '8px 12px', borderRadius: 8 }}>{err}</div>}
-            <button className="btn btn-primary" type="submit" disabled={loading} style={{ width: '100%', justifyContent: 'center', padding: 12 }}>
-              {loading ? <Spinner /> : '🚀 Connexion'}
-            </button>
-          </form>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Panneau droit — formulaire login ── */}
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:40 }}>
+        <div className="fade-in" style={{ width:'100%', maxWidth:400 }}>
+
+          <div style={{ marginBottom:32 }}>
+            <h2 style={{ fontSize:24, fontWeight:800, color:C.white, marginBottom:6 }}>Espace Opérateur Voyage</h2>
+            <p style={{ fontSize:13, color:C.muted }}>Connectez-vous pour accéder à votre tableau de bord transport</p>
+          </div>
+
+          {err && <div style={{ padding:'10px 14px', borderRadius:8, background:'#ef444418', border:'1px solid #ef444440', color:'#f87171', fontSize:12, marginBottom:20 }}>{err}</div>}
+
+          <div style={{ marginBottom:16 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:C.muted, display:'block', marginBottom:6 }}>Numéro de téléphone</label>
+            <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="0700000000" style={inputStyle} onKeyDown={e => e.key==='Enter' && handleLogin()} autoFocus />
+          </div>
+
+          <div style={{ marginBottom:24 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:C.muted, display:'block', marginBottom:6 }}>Mot de passe</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mot de passe" style={inputStyle} onKeyDown={e => e.key==='Enter' && handleLogin()} autoComplete="new-password" />
+          </div>
+
+          <button onClick={handleLogin} disabled={loading || !phone || !password} style={btnStyle(!loading && !!phone && !!password)}>
+            {loading ? <Spinner /> : 'Se connecter →'}
+          </button>
+
+          <p style={{ textAlign:'center', fontSize:11, color:C.muted, marginTop:28 }}>
+            SOKORA Voyage · Transport Interurbain · v3.0
+          </p>
         </div>
       </div>
     </div>
@@ -679,11 +729,17 @@ function RoutesScreen({ company }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
               <label className="form-label">Ville de départ *</label>
-              <input className="input" placeholder="ex: Abidjan" value={form.origin} onChange={e => setForm(f => ({ ...f, origin: e.target.value }))} />
+              <select className="input" value={form.origin} onChange={e => setForm(f => ({ ...f, origin: e.target.value }))}>
+                <option value="">— Choisir une ville —</option>
+                {CI_CITIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
             <div className="form-group">
               <label className="form-label">Ville d'arrivée *</label>
-              <input className="input" placeholder="ex: Aboisso" value={form.destination} onChange={e => setForm(f => ({ ...f, destination: e.target.value }))} />
+              <select className="input" value={form.destination} onChange={e => setForm(f => ({ ...f, destination: e.target.value }))}>
+                <option value="">— Choisir une ville —</option>
+                {CI_CITIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
           </div>
           <div className="form-group">

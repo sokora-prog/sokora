@@ -1,6 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { authApi, serviceApi } from './services/api';
 
+const CI_CITIES = [
+  'Abidjan','Yamoussoukro','Bouaké','Daloa','San-Pédro','Korhogo','Man','Gagnoa',
+  'Abengourou','Divo','Soubré','Odienné','Bondoukou','Séguéla','Ferkessédougou',
+  'Katiola','Aboisso','Adzopé','Agboville','Anyama','Bingerville','Grand-Bassam',
+  'Grand-Lahou','Guiglo','Issia','Jacqueville','Lakota','Sassandra','Tiassalé',
+  'Toumodi','Vavoua','Zuénoula','Tabou','Boundiali','Tengréla','Bouna','Dabou',
+  'Duekoué','Sinfra','Oumé','Dimbokro','Bongouanou',
+];
+
 /* ════════════════════════════════════════════════════════════════
    CHARTE GRAPHIQUE SOKORA OFFICIELLE
 ════════════════════════════════════════════════════════════════ */
@@ -18,23 +27,29 @@ const C = {
   tealPale:    '#00D4AA12',
   tealBorder:  '#00D4AA40',
   white:       '#f0f4ff',
+  whiteOff:    '#E8EDF5',
   muted:       '#6b84a3',
+  mutedLight:  '#8A9BC0',
   green:       '#22c55e',
+  greenPale:   '#22c55e12',
   red:         '#ef4444',
+  redPale:     '#ef444412',
   yellow:      '#f59e0b',
 };
 
 const STATUS_COLORS = {
-  PENDING:     { bg:'#f59e0b22', color:'#f59e0b', label:'En attente' },
-  CONFIRMED:   { bg:'#00D4AA22', color:'#00D4AA', label:'Confirmé' },
-  IN_PROGRESS: { bg:'#3b82f622', color:'#3b82f6', label:'En cours' },
-  COMPLETED:   { bg:'#22c55e22', color:'#22c55e', label:'Terminé' },
-  CANCELLED:   { bg:'#ef444422', color:'#ef4444', label:'Annulé' },
+  PENDING_VALIDATION: { bg:'#f59e0b22', color:'#f59e0b', label:'En attente validation' },
+  CONFIRMED:          { bg:'#00D4AA22', color:'#00D4AA', label:'Confirmé' },
+  PAID:               { bg:'#3b82f622', color:'#3b82f6', label:'Payé (escrow)' },
+  IN_PROGRESS:        { bg:'#a78bfa22', color:'#a78bfa', label:'En cours' },
+  COMPLETED:          { bg:'#22c55e22', color:'#22c55e', label:'Terminé' },
+  CANCELLED:          { bg:'#ef444422', color:'#ef4444', label:'Annulé' },
 };
 
 const GLOBAL_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: ${C.bg}; color: ${C.white}; font-family: 'Inter', system-ui, sans-serif; }
+  body { background: ${C.bg}; color: ${C.white}; font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
   .app { display: flex; min-height: 100vh; }
   .sidebar { width: 220px; flex-shrink: 0; background: ${C.surface}; border-right: 1px solid ${C.border};
     display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; }
@@ -90,53 +105,106 @@ function Badge({ status }) {
    LOGIN
 ════════════════════════════════════════════════════════════════ */
 function LoginScreen({ onLogin }) {
-  const [phone, setPhone] = useState('');
-  const [pass, setPass]   = useState('');
-  const [err, setErr]     = useState('');
-  const [loading, setLoading] = useState(false);
+  const [phone, setPhone]       = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [err, setErr]           = useState('');
 
-  const handle = async (e) => {
-    e.preventDefault();
+  const inputStyle = { width:'100%', padding:'12px 14px', borderRadius:10, background:'#0b1829', border:`1px solid ${C.border}`, color:C.white, fontSize:14, outline:'none', fontFamily:'inherit', transition:'border-color .2s' };
+  const btnStyle = ok => ({ width:'100%', padding:'13px 20px', borderRadius:10, border:'none', background: ok ? `linear-gradient(135deg, ${C.teal}, #00B090)` : `${C.teal}55`, color:'#fff', fontWeight:800, fontSize:14, cursor: ok ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:8 });
+
+  const handleLogin = async () => {
+    if (!phone || !password) return;
     setLoading(true); setErr('');
     try {
-      const r = await authApi.login({ phone_number: phone, password: pass });
-      localStorage.setItem('service_token', r.data.access_token);
-      localStorage.setItem('service_user', JSON.stringify(r.data.user || { phone_number: phone }));
-      onLogin(r.data.user || { phone_number: phone });
-    } catch {
-      setErr('Identifiants incorrects');
-    }
-    setLoading(false);
+      const { data } = await authApi.login({ phone_number: phone, password });
+      localStorage.setItem('service_token', data.access_token);
+      localStorage.setItem('service_user', JSON.stringify(data.user));
+      onLogin(data.user);
+    } catch (e) { setErr(e.response?.data?.detail || e.message || 'Numéro ou mot de passe incorrect'); }
+    finally { setLoading(false); }
   };
 
   return (
-    <div style={{minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:C.bg}}>
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', position: 'relative', overflow: 'hidden' }}>
       <style>{GLOBAL_CSS}</style>
-      <form onSubmit={handle} style={{background:C.card, border:`1px solid ${C.border}`,
-        borderRadius:20, padding:40, width:380, boxShadow:'0 20px 60px #00000066'}}>
-        <div style={{textAlign:'center', marginBottom:32}}>
-          <div style={{fontSize:32, fontWeight:900, color:C.white, letterSpacing:'-1px'}}>
-            SOKORA<span style={{color:C.orange}}>.</span>
+
+      {/* ── Panneau gauche décoratif ── */}
+      <div style={{
+        width: '45%',
+        background: 'linear-gradient(160deg, #052a22 0%, #0f1e35 100%)',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        padding: '60px 50px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        {/* Cercles décoratifs */}
+        <div style={{ position:'absolute', top:-80, right:-80, width:300, height:300, borderRadius:'50%', background:`${C.teal}15`, border:`1px solid ${C.teal}22` }} />
+        <div style={{ position:'absolute', bottom:-60, left:-60, width:200, height:200, borderRadius:'50%', background:`${C.teal}10` }} />
+
+        {/* Logo SOKORA Services */}
+        <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:48 }}>
+          <div style={{ width:52, height:52, borderRadius:14, background:C.teal, display:'flex', alignItems:'center', justifyContent:'center', fontSize:26, flexShrink:0 }}>🔧</div>
+          <div>
+            <div style={{ fontSize:22, fontWeight:900, color:C.white, letterSpacing:'-0.5px', lineHeight:1 }}>
+              SOKORA<span style={{ color:C.teal }}>.</span>
+            </div>
+            <div style={{ fontSize:10, color:C.teal, fontWeight:700, letterSpacing:2, textTransform:'uppercase', marginTop:2 }}>SERVICES</div>
           </div>
-          <div style={{fontSize:13, color:C.orange, fontWeight:700, marginTop:4}}>SERVICES INFORMELS</div>
         </div>
-        {err && <div style={{padding:'10px 14px', borderRadius:8, background:'#ff4d4d22',
-          color:'#ff6b6b', fontSize:12, marginBottom:16}}>{err}</div>}
-        <label style={{fontSize:12, color:C.muted}}>Téléphone</label>
-        <input value={phone} onChange={e=>setPhone(e.target.value)}
-          style={{width:'100%', padding:'12px 14px', borderRadius:10, margin:'6px 0 16px',
-            background:C.bg, border:`1px solid ${C.border}`, color:C.white, fontSize:14}} />
-        <label style={{fontSize:12, color:C.muted}}>Mot de passe</label>
-        <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
-          style={{width:'100%', padding:'12px 14px', borderRadius:10, margin:'6px 0 24px',
-            background:C.bg, border:`1px solid ${C.border}`, color:C.white, fontSize:14}} />
-        <button type="submit" disabled={loading} style={{width:'100%', padding:'14px',
-          borderRadius:10, border:'none',
-          background:`linear-gradient(135deg, ${C.orange}, ${C.orangeHov})`,
-          color:'#fff', fontWeight:800, fontSize:15, cursor:'pointer'}}>
-          {loading ? 'Connexion…' : 'Se connecter'}
-        </button>
-      </form>
+
+        <h1 style={{ fontSize:30, fontWeight:800, color:C.white, lineHeight:1.25, marginBottom:16 }}>
+          Gérez vos artisans<br />
+          <span style={{ color:C.teal }}>& prestataires</span>
+        </h1>
+        <p style={{ fontSize:13, color:C.muted, lineHeight:1.75 }}>
+          Demandes de service, paiements escrow SOKORA Wallet, suivi des prestations — tout en un seul tableau de bord.
+        </p>
+
+        <div style={{ marginTop:40, display:'flex', flexDirection:'column', gap:14 }}>
+          {[
+            'Paiement sécurisé via Wallet SOKORA',
+            'Suivi des demandes en temps réel',
+            'Gestion des artisans vérifiés',
+          ].map(f => (
+            <div key={f} style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <div style={{ width:22, height:22, borderRadius:'50%', background:C.teal, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, flexShrink:0 }}>✓</div>
+              <span style={{ fontSize:13, color:C.muted }}>{f}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Panneau droit — formulaire login ── */}
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:40 }}>
+        <div style={{ width:'100%', maxWidth:400 }}>
+
+          <div style={{ marginBottom:28 }}>
+            <h2 style={{ fontSize:24, fontWeight:800, color:C.white, marginBottom:6 }}>Espace Coordinateur Services</h2>
+            <p style={{ fontSize:13, color:C.muted }}>Connectez-vous pour gérer vos artisans et prestataires</p>
+          </div>
+
+          {err && <div style={{ padding:'10px 14px', borderRadius:8, background:'#ef444418', border:'1px solid #ef444440', color:'#f87171', fontSize:12, marginBottom:20 }}>{err}</div>}
+
+          <div style={{ marginBottom:20 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:C.muted, display:'block', marginBottom:6 }}>Numéro de téléphone</label>
+            <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="0700000000" style={inputStyle} onKeyDown={e => e.key==='Enter' && handleLogin()} autoComplete="off" autoFocus />
+          </div>
+          <div style={{ marginBottom:24 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:C.muted, display:'block', marginBottom:6 }}>Mot de passe</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mot de passe" style={inputStyle} onKeyDown={e => e.key==='Enter' && handleLogin()} autoComplete="new-password" />
+          </div>
+          <button onClick={handleLogin} disabled={loading || !phone || !password} style={btnStyle(!loading && !!phone && !!password)}>
+            {loading ? <Spinner /> : 'Se connecter →'}
+          </button>
+
+          <p style={{ textAlign:'center', fontSize:11, color:C.muted, marginTop:28 }}>
+            SOKORA Services · Artisans &amp; Prestataires · v3.0
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -164,16 +232,18 @@ function DashboardScreen() {
       </div>
 
       {/* KPIs */}
-      <div style={{display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:28}}>
+      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:14, marginBottom:28}}>
         {[
-          { icon:'🔧', label:'Prestataires actifs', val:data.total_providers, color:C.teal },
-          { icon:'✅', label:'Vérifiés SOKORA', val:data.verified_providers, color:C.green },
-          { icon:'📋', label:'Demandes totales', val:data.total_requests, color:C.orange },
-          { icon:'✔️', label:'Prestations terminées', val:data.status_counts?.COMPLETED||0, color:'#a78bfa' },
+          { icon:'🔧', label:'Prestataires actifs',        val: data.total_providers,                              color: C.teal },
+          { icon:'✅', label:'Vérifiés SOKORA',             val: data.verified_providers,                           color: C.green },
+          { icon:'📋', label:'Demandes totales',            val: data.total_requests,                               color: C.orange },
+          { icon:'⏳', label:'En attente validation',       val: data.status_counts?.PENDING_VALIDATION ?? 0,       color: '#f59e0b' },
+          { icon:'✔️', label:'Prestations terminées',       val: data.status_counts?.COMPLETED ?? 0,                color: '#a78bfa' },
+          { icon:'🔄', label:'En cours',                    val: data.status_counts?.IN_PROGRESS ?? 0,              color: C.mutedLight },
         ].map(k => (
           <div key={k.label} className="card">
             <div style={{fontSize:24}}>{k.icon}</div>
-            <div style={{fontWeight:800, color:k.color, fontSize:26, marginTop:8}}>{k.val}</div>
+            <div style={{fontWeight:800, color:k.color, fontSize:26, marginTop:8}}>{k.val ?? 0}</div>
             <div style={{fontSize:11, color:C.muted, marginTop:4}}>{k.label}</div>
           </div>
         ))}
@@ -358,7 +428,15 @@ function ProvidersScreen({ showToast }) {
               {categories.map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
             </select>
             <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:10}}>
-              <div><label style={{fontSize:12, color:C.muted}}>Ville</label>{inp('Abidjan', 'city')}</div>
+              <div>
+                <label style={{fontSize:12, color:C.muted}}>Ville</label>
+                <select value={form.city} onChange={e=>setForm(f=>({...f,city:e.target.value}))}
+                  style={{width:'100%', padding:'10px 12px', borderRadius:8, margin:'4px 0 12px',
+                    background:C.bg, border:`1px solid ${C.border}`, color:C.white, fontSize:13}}>
+                  <option value="">— Choisir —</option>
+                  {CI_CITIES.map(c=><option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
               <div><label style={{fontSize:12, color:C.muted}}>Quartier</label>{inp('Cocody, Yop…', 'neighborhood')}</div>
             </div>
             <label style={{fontSize:12, color:C.muted}}>Description</label>
@@ -488,9 +566,9 @@ function RequestsScreen({ showToast }) {
   };
 
   const NEXT_STATUS = {
-    PENDING:    ['CONFIRMED', 'CANCELLED'],
-    CONFIRMED:  ['IN_PROGRESS', 'CANCELLED'],
-    IN_PROGRESS:['COMPLETED', 'CANCELLED'],
+    PENDING_VALIDATION: ['CONFIRMED', 'CANCELLED'],
+    CONFIRMED:          ['IN_PROGRESS', 'CANCELLED'],
+    IN_PROGRESS:        ['COMPLETED', 'CANCELLED'],
   };
 
   return (

@@ -179,6 +179,62 @@ export const conciergeService = {
   getProfile:  () => api.get('/promo/profile/premium').then(r => r.data),
 };
 
+// ── CLIENT DASHBOARD — Agrégation cross-module ───────────────────────────────
+export const clientDashboardService = {
+  /**
+   * Dashboard unifié : wallet + upcoming events + loyalty + activity
+   * Requiert X-Client-Token header (token OTP client)
+   */
+  get: async (clientToken) => {
+    const res = await fetch(`${API_URL}/client/dashboard`, {
+      headers: { 'X-Client-Token': clientToken },
+    });
+    if (!res.ok) throw new Error('Dashboard unavailable');
+    return res.json();
+  },
+};
+
+// ── CLIENT SERVICES — Mes demandes de service ────────────────────────────────
+export const clientServicesApi = {
+  myRequests: async (token) => {
+    const res = await fetch(`${API_URL}/services/requests/my`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return res.ok ? res.json() : [];
+  },
+  payRequest: async (token, requestId) => {
+    const res = await fetch(`${API_URL}/services/requests/${requestId}/pay`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    });
+    return res.json();
+  },
+};
+
+// ── HOTEL CLIENT — Mes réservations ─────────────────────────────────────────
+export const clientHotelApi = {
+  myBookings: async (clientToken) => {
+    const res = await fetch(`${API_URL}/hotel/bookings/my`, {
+      headers: { 'X-Client-Token': clientToken },
+    });
+    return res.ok ? res.json() : [];
+  },
+};
+
+// ── VOYAGE CLIENT — Mes tickets ──────────────────────────────────────────────
+export const clientVoyageApi = {
+  myTickets: async (clientToken) => {
+    const res = await fetch(`${API_URL}/voyage/tickets/my`, {
+      headers: { 'X-Client-Token': clientToken },
+    });
+    return res.ok ? res.json() : [];
+  },
+};
+
+export const hotelService = {
+  me: () => api.get('/hotel/me'),
+};
+
 export default api;
 
 

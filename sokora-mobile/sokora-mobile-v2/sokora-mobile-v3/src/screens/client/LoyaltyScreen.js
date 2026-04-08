@@ -10,6 +10,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, API_URL } from '../../utils/constants';
+import ScreenHeader from '../../components/ScreenHeader';
 
 async function getClientToken() {
   if (Platform.OS === 'web') return localStorage.getItem('sokora_client_token');
@@ -81,15 +82,11 @@ export default function LoyaltyScreen({ navigation }) {
     <ScrollView style={s.root} showsVerticalScrollIndicator={false}>
 
       {/* ── Header navigation ── */}
-      <View style={s.navBar}>
-        {navigation && (
-          <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
-          </TouchableOpacity>
-        )}
-        <Text style={s.navTitle}>SOKORA Black 🖤</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="Fidélité SOKORA"
+        dark={true}
+      />
 
       {/* ── Hero card ── */}
       <View style={[s.heroCard, { backgroundColor: activeColor + '22', borderColor: activeColor + '66' }]}>

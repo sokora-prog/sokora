@@ -1,17 +1,42 @@
 /**
  * WalletScreen — SOKORA Client
- * Affiche le solde, QR Code dynamique (refresh 10s) et historique des transactions.
+ * Affiche le solde, carte NFC Pro Business, QR Code dynamique (refresh 10s) et historique.
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl, Animated,
+  ActivityIndicator, RefreshControl, Animated, LinearGradient,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
 import { API_URL } from '../../utils/constants';
 import { useTranslation } from '../../services/i18n';
+import ScreenHeader from '../../components/ScreenHeader';
+
+// ── Données démo offline ──────────────────────────────────────────────────────
+const DEMO_WALLET = {
+  balance: 2850000,
+  card: {
+    holder:  'MAHAMADOU BAMBA',
+    number:  'SKW-PRO-0001',
+    plan:    'Pro Business',
+    nfc:     true,
+    iban:    'CI92 0001 0000 0001 0001 001',
+  },
+  by_service: {
+    restaurant: { spent: 384000, count: 12 },
+    hotel:      { spent: 150000, count: 2  },
+    voyage:     { spent: 210000, count: 3  },
+  },
+  transactions: [
+    { id:1, description:'Dîner — Le Dakar',     tx_type:'payment', amount:-38500,  balance_after:2811500, created_at:'2026-04-05T19:42:00', service_type:'restaurant' },
+    { id:2, description:'Recharge Wave',         tx_type:'topup',   amount:200000,  balance_after:2850000, created_at:'2026-04-05T09:00:00', service_type:'cashback'   },
+    { id:3, description:'Nuit — Hôtel Ivoire',   tx_type:'payment', amount:-75000,  balance_after:2650000, created_at:'2026-04-04T14:00:00', service_type:'hotel'      },
+    { id:4, description:'Bus Abidjan-Bouaké',    tx_type:'payment', amount:-12000,  balance_after:2725000, created_at:'2026-04-03T07:30:00', service_type:'voyage'     },
+    { id:5, description:'Cashback fidélité',     tx_type:'cashback',amount:5500,    balance_after:2737000, created_at:'2026-04-02T12:00:00', service_type:'cashback'   },
+  ],
+};
 
 const SERVICE_LABELS = {
   restaurant: { label: 'Restaurant',  icon: 'restaurant',    color: Colors.orange },
@@ -46,7 +71,9 @@ export default function WalletScreen({ clientToken, navigation }) {
       setWallet(data);
       setError(null);
     } catch (e) {
-      setError(e.message);
+      // Mode démo offline — données mock
+      setWallet(DEMO_WALLET);
+      setError(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -106,11 +133,33 @@ export default function WalletScreen({ clientToken, navigation }) {
     );
   }
 
+  if (error && !wallet) {
+    return (
+      <View style={styles.root}>
+        <ScreenHeader navigation={navigation} title="Mon Wallet" dark={true} />
+        <View style={styles.center}>
+          <Ionicons name="cloud-offline-outline" size={48} color={Colors.textFaint} />
+          <Text style={styles.errorText}>Erreur de chargement</Text>
+          <Text style={styles.errorSub}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => { setLoading(true); setError(null); loadWallet(); }}
+          >
+            <Ionicons name="refresh" size={16} color="#fff" />
+            <Text style={styles.retryBtnText}>Réessayer</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   const transactions = wallet?.transactions || [];
   const byService    = wallet?.by_service   || {};
   const balance      = wallet?.balance ?? 0;
 
   return (
+    <View style={styles.root}>
+      <ScreenHeader navigation={navigation} title="Mon Wallet" dark={true} />
     <ScrollView
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.orange} />}
@@ -123,6 +172,60 @@ export default function WalletScreen({ clientToken, navigation }) {
         </Text>
         <Text style={styles.balanceSub}>Wallet universel — utilisable partout</Text>
       </View>
+
+      {/* ── Carte NFC Pro Business ── */}
+      {wallet?.card && (
+        <View style={styles.nfcCard}>
+          {/* Cercles déco */}
+          <View style={styles.nfcCircle1} />
+          <View style={styles.nfcCircle2} />
+
+          {/* Badge plan + NFC */}
+          <View style={styles.nfcTopRow}>
+            <View style={styles.nfcBadge}>
+              <Text style={styles.nfcBadgeText}>{wallet.card.plan}</Text>
+            </View>
+            {wallet.card.nfc && (
+              <View style={styles.nfcChip}>
+                <Ionicons name="radio-outline" size={14} color={Colors.gold} />
+                <Text style={styles.nfcChipText}>NFC</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Logo SOKORA */}
+          <Text style={styles.nfcBrand}>SOKORA</Text>
+
+          {/* N° compte */}
+          <Text style={styles.nfcNumber}>{wallet.card.number}</Text>
+
+          {/* Titulaire + IBAN */}
+          <View style={styles.nfcBottomRow}>
+            <View>
+              <Text style={styles.nfcLabel}>Titulaire</Text>
+              <Text style={styles.nfcHolder}>{wallet.card.holder}</Text>
+            </View>
+            <View style={styles.nfcIbanBox}>
+              <Text style={styles.nfcLabel}>IBAN</Text>
+              <Text style={styles.nfcIban}>{wallet.card.iban}</Text>
+            </View>
+          </View>
+
+          {/* Actions rapides */}
+          <View style={styles.nfcActions}>
+            {[
+              { label: 'Envoyer',  icon: 'arrow-up-circle-outline'   },
+              { label: 'Recevoir', icon: 'arrow-down-circle-outline'  },
+              { label: 'Payer NFC',icon: 'radio-outline'              },
+            ].map(btn => (
+              <TouchableOpacity key={btn.label} style={styles.nfcBtn}>
+                <Ionicons name={btn.icon} size={22} color={Colors.gold} />
+                <Text style={styles.nfcBtnText}>{btn.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
 
       {/* ── QR Code dynamique ── */}
       <View style={styles.qrSection}>
@@ -243,13 +346,88 @@ export default function WalletScreen({ clientToken, navigation }) {
         )}
       </View>
     </ScrollView>
+    </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  root:         { flex: 1, backgroundColor: Colors.bg },
   container:    { flex: 1, backgroundColor: Colors.bg },
   center:       { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.bg },
+
+  // NFC Pro Business Card
+  nfcCard: {
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
+    borderRadius: Radius.xl,
+    backgroundColor: '#0F1E35',
+    padding: Spacing.xl,
+    overflow: 'hidden',
+    position: 'relative',
+    ...Shadow.lg,
+  },
+  nfcCircle1: {
+    position: 'absolute', width: 180, height: 180, borderRadius: 90,
+    backgroundColor: 'rgba(240,125,26,0.08)', top: -60, right: -40,
+  },
+  nfcCircle2: {
+    position: 'absolute', width: 120, height: 120, borderRadius: 60,
+    backgroundColor: 'rgba(25,169,157,0.06)', bottom: -30, left: -20,
+  },
+  nfcTopRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: Spacing.md,
+  },
+  nfcBadge: {
+    backgroundColor: 'rgba(240,125,26,0.15)',
+    borderWidth: 1, borderColor: 'rgba(240,125,26,0.35)',
+    borderRadius: Radius.full,
+    paddingHorizontal: 10, paddingVertical: 3,
+  },
+  nfcBadgeText: {
+    color: Colors.orange, fontSize: Typography.xs,
+    fontWeight: '800', letterSpacing: 1.5, textTransform: 'uppercase',
+  },
+  nfcChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    borderRadius: Radius.full,
+    paddingHorizontal: 8, paddingVertical: 3,
+  },
+  nfcChipText: {
+    color: Colors.gold, fontSize: Typography.xs, fontWeight: '900',
+  },
+  nfcBrand: {
+    color: 'rgba(255,255,255,0.9)', fontSize: Typography['2xl'],
+    fontWeight: '900', letterSpacing: 4, marginBottom: Spacing.sm,
+  },
+  nfcNumber: {
+    fontFamily: 'monospace', color: Colors.gold,
+    fontSize: Typography.md, fontWeight: '700',
+    letterSpacing: 2, marginBottom: Spacing.lg,
+  },
+  nfcBottomRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'flex-end', marginBottom: Spacing.lg,
+  },
+  nfcLabel: {
+    color: 'rgba(255,255,255,0.4)', fontSize: Typography.xs,
+    marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.8,
+  },
+  nfcHolder: {
+    color: '#fff', fontSize: Typography.base, fontWeight: '700', letterSpacing: 1,
+  },
+  nfcIbanBox: { alignItems: 'flex-end' },
+  nfcIban: {
+    color: 'rgba(255,255,255,0.6)', fontFamily: 'monospace', fontSize: Typography.xs,
+  },
+  nfcActions: {
+    flexDirection: 'row', justifyContent: 'space-around',
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)',
+    paddingTop: Spacing.md, marginTop: Spacing.sm,
+  },
+  nfcBtn: { alignItems: 'center', gap: 4 },
+  nfcBtnText: { color: 'rgba(255,255,255,0.6)', fontSize: Typography.xs, fontWeight: '600' },
 
   // Balance
   balanceCard: {
@@ -350,4 +528,15 @@ const styles = StyleSheet.create({
   txAmountCol: { alignItems: 'flex-end' },
   txAmount:    { fontSize: Typography.sm, fontWeight: '700' },
   txBalance:   { fontSize: Typography.xs, color: Colors.textFaint, marginTop: 1 },
+
+  // Error state
+  errorText: { fontSize: Typography.lg, fontWeight: '700', color: Colors.text, marginTop: Spacing.md },
+  errorSub:  { fontSize: Typography.sm, color: Colors.textMuted, marginTop: Spacing.sm, textAlign: 'center', paddingHorizontal: Spacing.xl },
+  retryBtn:  {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: Colors.orange, borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md,
+    marginTop: Spacing.lg,
+  },
+  retryBtnText: { fontSize: Typography.sm, fontWeight: '700', color: '#fff' },
 });

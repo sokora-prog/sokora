@@ -3,7 +3,7 @@
  * Navigation complète : Client | Serveur | Manager | Chauffeur
  */
 import React from 'react';
-import { View, ActivityIndicator, Text, FlatList, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, ActivityIndicator, Text, FlatList, TouchableOpacity, RefreshControl, Linking } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -17,7 +17,12 @@ import { ordersService } from '../services/api';
 import { notificationService } from '../services/notifications';
 
 // ── AUTH ────────────────────────────────────────────────────────────────────
-import LoginScreen from '../screens/auth/LoginScreen';
+import LoginScreen          from '../screens/auth/LoginScreen';
+import RoleSelectorScreen   from '../screens/auth/RoleSelectorScreen';
+import LoginClientScreen    from '../screens/auth/LoginClientScreen';
+import LoginArtisanScreen   from '../screens/auth/LoginArtisanScreen';
+import LoginStaffScreen     from '../screens/auth/LoginStaffScreen';
+import RegisterArtisanScreen from '../screens/auth/RegisterArtisanScreen';
 
 // ── WAITER ──────────────────────────────────────────────────────────────────
 import WaiterHomeScreen  from '../screens/waiter/HomeScreen';
@@ -54,6 +59,18 @@ import MyTripsScreen             from '../screens/client/MyTripsScreen';
 import PaymentRequestScreen      from '../screens/client/PaymentRequestScreen';
 import LoyaltyScreen             from '../screens/client/LoyaltyScreen';
 
+// ── SERVICE CLIENT ──────────────────────────────────────────────────────────
+import ServiceSearchScreen   from '../screens/client/ServiceSearchScreen';
+import ServiceProviderScreen from '../screens/client/ServiceProviderScreen';
+import MyServicesScreen      from '../screens/client/MyServicesScreen';
+import ActivityScreen        from '../screens/client/ActivityScreen';
+
+// ── ARTISAN ──────────────────────────────────────────────────────────────────
+import ArtisanHomeScreen         from '../screens/artisan/ArtisanHomeScreen';
+import ArtisanAppointmentsScreen from '../screens/artisan/ArtisanAppointmentsScreen';
+import ArtisanScanScreen         from '../screens/artisan/ArtisanScanScreen';
+import ArtisanWalletScreen       from '../screens/artisan/ArtisanWalletScreen';
+
 // ── CHAUFFEUR ────────────────────────────────────────────────────────────────
 import DriverScanScreen from '../screens/driver/DriverScanScreen';
 
@@ -66,6 +83,32 @@ const SplashScreen = () => (
     <ActivityIndicator size="large" color={Colors.orange} />
   </View>
 );
+
+// ── HOTEL MANAGER SCREEN ─────────────────────────────────────────────────────
+function HotelManagerScreen({ user }) {
+  const { logout } = useAuth();
+  const hotel = user.hotel;
+  return (
+    <View style={{ flex: 1, backgroundColor: Colors.navy, alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+      <Text style={{ fontSize: 40, marginBottom: 16 }}>🏨</Text>
+      <Text style={{ fontSize: 22, fontWeight: '800', color: '#fff', textAlign: 'center', marginBottom: 6 }}>
+        {hotel?.name || 'Tableau de bord Hôtel'}
+      </Text>
+      <Text style={{ fontSize: 13, color: Colors.textMuted, textAlign: 'center', marginBottom: 32 }}>
+        {hotel?.city || hotel?.address || 'Gérez votre établissement'}
+      </Text>
+      <TouchableOpacity
+        onPress={() => Linking.openURL('https://hotel.sokora.fun')}
+        style={{ backgroundColor: Colors.orange, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 32, marginBottom: 14 }}
+      >
+        <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Ouvrir le Dashboard Hôtel →</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={logout}>
+        <Text style={{ color: Colors.textMuted, fontSize: 13, marginTop: 8 }}>Se déconnecter</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // 🛒 NAVIGATION CLIENT
@@ -88,6 +131,10 @@ function ClientHomeStack() {
       <Stack.Screen name="MyTrips"            component={MyTripsScreen} />
       <Stack.Screen name="PaymentRequest"     component={PaymentRequestScreen} />
       <Stack.Screen name="Loyalty"            component={LoyaltyScreen} />
+      <Stack.Screen name="ServiceSearch"      component={ServiceSearchScreen} />
+      <Stack.Screen name="ServiceProvider"    component={ServiceProviderScreen} />
+      <Stack.Screen name="MyServices"         component={MyServicesScreen} />
+      <Stack.Screen name="Activity"           component={ActivityScreen} />
     </Stack.Navigator>
   );
 }
@@ -152,6 +199,8 @@ function ClientProfileStack() {
       <Stack.Screen name="MyBookings"    component={MyBookingsScreen} />
       <Stack.Screen name="MyTrips"       component={MyTripsScreen} />
       <Stack.Screen name="Loyalty"       component={LoyaltyScreen} />
+      <Stack.Screen name="MyServices"    component={MyServicesScreen} />
+      <Stack.Screen name="Activity"      component={ActivityScreen} />
     </Stack.Navigator>
   );
 }
@@ -383,6 +432,90 @@ function WaiterTabs() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// 🔧 NAVIGATION ARTISAN
+// ════════════════════════════════════════════════════════════════════════════
+
+function ArtisanHomeStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ArtisanHomeMain" component={ArtisanHomeScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function ArtisanAppointmentsStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ArtisanApptMain" component={ArtisanAppointmentsScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function ArtisanScanStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ArtisanScan" component={ArtisanScanScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function ArtisanWalletStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ArtisanWalletMain" component={ArtisanWalletScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function ArtisanTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarActiveTintColor: '#FF6B35',
+        tabBarInactiveTintColor: '#8892A4',
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1, borderTopColor: '#DDE4F0',
+          height: 66, paddingBottom: 12, paddingTop: 8,
+          shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 12, elevation: 8,
+        },
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '700' },
+        tabBarIcon: ({ focused, color }) => {
+          const icons = {
+            'Tableau de bord': focused ? 'grid'          : 'grid-outline',
+            'Rendez-vous':     focused ? 'calendar'      : 'calendar-outline',
+            'Scanner':         focused ? 'qr-code'       : 'qr-code-outline',
+            'Wallet':          focused ? 'wallet'        : 'wallet-outline',
+          };
+          if (route.name === 'Scanner') {
+            return (
+              <View style={{
+                width: 52, height: 52, borderRadius: 26,
+                backgroundColor: focused ? '#FF6B35' : '#0F1E35',
+                justifyContent: 'center', alignItems: 'center',
+                marginBottom: 16,
+                shadowColor: '#FF6B35',
+                shadowOpacity: focused ? 0.5 : 0.2,
+                shadowRadius: 10, elevation: 8,
+              }}>
+                <Ionicons name={icons[route.name]} size={22} color="#fff" />
+              </View>
+            );
+          }
+          return <Ionicons name={icons[route.name] || 'ellipse-outline'} size={22} color={color} />;
+        },
+      })}
+    >
+      <Tab.Screen name="Tableau de bord" component={ArtisanHomeStack} />
+      <Tab.Screen name="Rendez-vous"     component={ArtisanAppointmentsStack} />
+      <Tab.Screen name="Scanner"         component={ArtisanScanStack} />
+      <Tab.Screen name="Wallet"          component={ArtisanWalletStack} />
+    </Tab.Navigator>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // 🚗 NAVIGATION CHAUFFEUR
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -442,7 +575,13 @@ export default function AppNavigator() {
     return (
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="RoleSelector"    component={RoleSelectorScreen} />
+          <Stack.Screen name="LoginClient"     component={LoginClientScreen} />
+          <Stack.Screen name="LoginArtisan"    component={LoginArtisanScreen} />
+          <Stack.Screen name="LoginStaff"      component={LoginStaffScreen} />
+          <Stack.Screen name="RegisterArtisan" component={RegisterArtisanScreen} />
+          {/* Ancien écran conservé pour compatibilité */}
+          <Stack.Screen name="Login"           component={LoginStaffScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     );
@@ -453,12 +592,16 @@ export default function AppNavigator() {
     const role = (user.role || '').toLowerCase();
     switch (role) {
       case 'super_admin':
-      case 'manager':
         return <ManagerTabs />;
+      case 'manager':
+        // Gérant hôtel → interface hôtel, gérant restaurant → tabs serveur
+        return user.isHotelManager ? <HotelManagerScreen user={user} /> : <ManagerTabs />;
       case 'waiter':
         return <WaiterTabs />;
       case 'driver':
         return <DriverTabs />;
+      case 'artisan':
+        return <ArtisanTabs />;
       case 'client':
       default:
         return <ClientTabs />;

@@ -11,6 +11,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
 import { API_URL } from '../../utils/constants';
+import ScreenHeader from '../../components/ScreenHeader';
 
 async function getClientToken() {
   if (Platform.OS === 'web') return localStorage.getItem('sokora_client_token');
@@ -101,20 +102,12 @@ export default function SeatPickerScreen({ route, navigation }) {
   return (
     <View style={styles.container}>
       {/* ── Header trajet ── */}
-      <View style={styles.tripInfo}>
-        <View style={styles.tripRoute}>
-          <Text style={styles.tripCity}>{trip.origin}</Text>
-          <Ionicons name="arrow-forward" size={16} color={Colors.orange} />
-          <Text style={styles.tripCity}>{trip.destination}</Text>
-        </View>
-        <Text style={styles.tripTime}>
-          {new Date(trip.departure_at).toLocaleString('fr-FR', {
-            weekday: 'long', day: '2-digit', month: 'long',
-            hour: '2-digit', minute: '2-digit'
-          })}
-        </Text>
-        <Text style={styles.tripPrice}>{trip.price.toLocaleString('fr-FR')} FCFA / place</Text>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title={`${trip.origin} → ${trip.destination}`}
+        subtitle={`${new Date(trip.departure_at).toLocaleString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })} · ${trip.price.toLocaleString('fr-FR')} FCFA`}
+        dark={true}
+      />
 
       {/* ── Légende ── */}
       <View style={styles.legend}>

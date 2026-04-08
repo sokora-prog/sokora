@@ -17,7 +17,8 @@ api.interceptors.request.use(cfg => {
 api.interceptors.response.use(
   res => res,
   err => {
-    if (err.response?.status === 401) {
+    const isLoginCall = err.config?.url?.includes('/auth/login');
+    if (err.response?.status === 401 && !isLoginCall) {
       localStorage.removeItem('hotel_token');
       localStorage.removeItem('hotel_user');
       window.location.href = '/';
@@ -27,8 +28,11 @@ api.interceptors.response.use(
 );
 
 export const authApi = {
-  login: (phone_number, password) => api.post('/auth/login', { phone_number, password }),
-  me: () => api.get('/auth/me'),
+  login:      (phone_number, password) => api.post('/auth/login', { phone_number, password }),
+  me:         () => api.get('/auth/me'),
+  requestOtp: (phone) => api.post('/auth/request-otp', { phone }),
+  verifyOtp:  (phone, code, password) =>
+    api.post('/auth/verify-otp-login', { phone, code, ...(password ? { password } : {}) }),
 };
 
 export const hotelApi = {

@@ -2,13 +2,15 @@
  * BookingConfirmScreen — SOKORA Client
  * Affiche le billet de voyage avec QR code d'embarquement.
  */
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Share,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
+import ScreenHeader from '../../components/ScreenHeader';
+import ReceiptModal from '../../components/ReceiptModal';
 
 const STATUS_CONFIG = {
   CONFIRMED: { label: '✅ Confirmée',  color: Colors.green,  bg: Colors.greenPale  },
@@ -19,6 +21,24 @@ const STATUS_CONFIG = {
 
 export default function BookingConfirmScreen({ route, navigation }) {
   const { booking } = route?.params || {};
+
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [receipt, setReceipt] = useState(null);
+
+  useEffect(() => {
+    if (booking) {
+      setReceipt({
+        origin:       booking.origin,
+        destination:  booking.destination,
+        departure_at: booking.departure_at,
+        seats:        booking.seat_number ? String(booking.seat_number) : undefined,
+        seat_number:  booking.seat_number,
+        amount:       booking.amount_paid,
+        qr_token:     booking.qr_token,
+      });
+      setShowReceipt(true);
+    }
+  }, []);
 
   if (!booking) {
     return (
@@ -41,6 +61,13 @@ export default function BookingConfirmScreen({ route, navigation }) {
 
   return (
     <ScrollView style={styles.container}>
+      <ReceiptModal
+        visible={showReceipt}
+        onClose={() => setShowReceipt(false)}
+        receipt={receipt}
+        type="voyage"
+      />
+      <ScreenHeader navigation={navigation} title="Confirmation" dark={true} />
       {/* ── Success header ── */}
       <View style={styles.successHeader}>
         <View style={styles.successIcon}>

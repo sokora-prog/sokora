@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
 import { API_URL } from '../../utils/constants';
 import * as SecureStore from 'expo-secure-store';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const fmt = n => new Intl.NumberFormat('fr-FR').format(n ?? 0) + ' F';
 
@@ -153,20 +154,12 @@ export default function PaymentRequestScreen({ route, navigation }) {
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={Colors.navy} />
-        </TouchableOpacity>
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerEst}>{request.establishment_name}</Text>
-          {request.table_number && (
-            <Text style={styles.headerTable}>Table {request.table_number}</Text>
-          )}
-        </View>
-        <View style={[styles.statusBadge, request.status === 'pending' && styles.statusPending]}>
-          <Text style={styles.statusText}>En attente</Text>
-        </View>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="Demande de paiement"
+        subtitle={request.table_number ? `${request.establishment_name} · Table ${request.table_number}` : request.establishment_name}
+        dark={true}
+      />
 
       {/* Détail facture */}
       <View style={styles.receiptCard}>

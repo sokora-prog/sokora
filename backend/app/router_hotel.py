@@ -286,7 +286,26 @@ def scan_checkin(
     if not qr_code:
         raise HTTPException(400, "QR Code requis")
 
-    return crud_hotel.process_checkin(db, qr_code, current_user.id, lat, lng)
+    result = crud_hotel.process_checkin(db, qr_code, current_user.id, lat, lng)
+
+    # Ajouter points fidélité (1 point par 500F dépensé)
+    try:
+        from .models_hotel import Reservation
+        reservation = db.query(Reservation).filter(Reservation.qr_code == qr_code).first()
+        if reservation:
+            client = db.query(models.ClientAccount).filter(
+                models.ClientAccount.id == reservation.client_id
+            ).first()
+            if client:
+                points_earned = int((reservation.total_amount or 0) / 500)
+                if points_earned > 0:
+                    client.total_points = (client.total_points or 0) + points_earned
+                    client.total_spent = (client.total_spent or 0) + (reservation.total_amount or 0)
+                    db.commit()
+    except Exception:
+        pass
+
+    return result
 
 
 @router.post("/reservations/{reservation_id}/checkout")

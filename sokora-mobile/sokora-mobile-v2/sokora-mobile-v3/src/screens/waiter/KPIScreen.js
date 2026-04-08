@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Shadow } from '../../utils/constants';
 import { API_URL } from '../../utils/constants';
 import * as SecureStore from 'expo-secure-store';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const { width: W } = Dimensions.get('window');
 const CHART_W = W - 48;
@@ -168,15 +169,12 @@ export default function KPIScreen({ navigation }) {
   return (
     <View style={styles.container}>
       {/* HEADER */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Tableau de bord KPI</Text>
-          <Text style={styles.headerSub}>Analyse de performance</Text>
-        </View>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="KPI & Performance"
+        subtitle="Analyse de performance"
+        dark={true}
+      />
 
       {/* SÉLECTEUR PÉRIODE */}
       <View style={styles.periodRow}>

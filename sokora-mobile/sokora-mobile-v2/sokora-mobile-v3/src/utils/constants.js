@@ -119,7 +119,7 @@ export const OrderStatus = {
 // En prod : remplacer PROD_URL par 'https://api.sokora.app'
 import { NativeModules, Platform } from 'react-native';
 
-const PROD_URL = 'https://api.sokora.app';
+const PROD_URL = 'https://api.sokora.fun';
 const BACKEND_PORT = 8001;
 
 const _getApiUrl = () => {
@@ -139,7 +139,7 @@ const _getApiUrl = () => {
   } catch {}
 
   // Fallback si rien ne fonctionne
-  return `http://10.36.250.43:${BACKEND_PORT}`;
+  return `http://192.168.1.2:${BACKEND_PORT}`;
 };
 
 export const API_URL = _getApiUrl();

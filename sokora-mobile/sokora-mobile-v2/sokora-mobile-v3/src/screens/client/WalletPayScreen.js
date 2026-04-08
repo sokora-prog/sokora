@@ -14,6 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
 import { walletService } from '../../services/api';
 import { useAuth } from '../../services/AuthContext';
+import ScreenHeader from '../../components/ScreenHeader';
+import ReceiptModal from '../../components/ReceiptModal';
 
 const QUICK_AMOUNTS = [1000, 2000, 5000, 10000, 20000];
 
@@ -38,6 +40,9 @@ export default function WalletPayScreen({ navigation }) {
   const [txHistory, setHistory]     = useState([]);
   const [topupModal, setTopupModal] = useState(false);
   const [topupAmount, setTopupAmt]  = useState('');
+
+  const [showReceipt,   setShowReceipt]   = useState(false);
+  const [walletReceipt, setWalletReceipt] = useState(null);
 
   const timerRef   = useRef(null);
   const pulseAnim  = useRef(new Animated.Value(1)).current;
@@ -86,6 +91,18 @@ export default function WalletPayScreen({ navigation }) {
 
       setCode({ code, ussdCode, amount: amt, method: payMethod, generatedAt: Date.now() });
       startCountdown(60);
+
+      // Reçu automatique pour paiement wallet SOKORA
+      if (payMethod === 'wallet') {
+        const selectedMethod = PAYMENT_METHODS.find(m => m.id === payMethod);
+        setWalletReceipt({
+          from_name:   'Mon Wallet',
+          to_name:     'Commerçant',
+          amount:      amt,
+          description: `Paiement SOKORA via ${selectedMethod?.label || 'Wallet'}`,
+        });
+        setShowReceipt(true);
+      }
 
       // Animation pulse
       Animated.sequence([
@@ -161,6 +178,13 @@ export default function WalletPayScreen({ navigation }) {
   }
 
   return (
+    <>
+      <ReceiptModal
+        visible={showReceipt}
+        onClose={() => setShowReceipt(false)}
+        receipt={walletReceipt}
+        type="wallet"
+      />
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ paddingBottom: 40 }}
@@ -168,15 +192,13 @@ export default function WalletPayScreen({ navigation }) {
       showsVerticalScrollIndicator={false}
     >
       {/* ── Header ── */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Mon Wallet</Text>
-        <TouchableOpacity style={styles.headerAction} onPress={() => navigation?.navigate('Wallet')}>
-          <Ionicons name="time-outline" size={22} color="#fff" />
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="Wallet SOKORA"
+        dark={true}
+        rightIcon="time-outline"
+        onRightPress={() => navigation?.navigate('Wallet')}
+      />
 
       {/* ── Carte Solde ── */}
       <View style={styles.balanceCard}>
@@ -460,6 +482,7 @@ export default function WalletPayScreen({ navigation }) {
         </View>
       </Modal>
     </ScrollView>
+    </>
   );
 }
 

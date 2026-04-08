@@ -95,6 +95,17 @@ def create_booking(
     client = _get_client(request, db)
     try:
         booking = crud_voyage.create_booking(db, client.id, data)
+
+        # Ajouter points fidélité (1 point par 500F dépensé)
+        try:
+            points_earned = int((booking.amount_paid or 0) / 500)
+            if points_earned > 0:
+                client.total_points = (client.total_points or 0) + points_earned
+                client.total_spent = (client.total_spent or 0) + (booking.amount_paid or 0)
+                db.commit()
+        except Exception:
+            pass
+
         return crud_voyage._format_booking(booking)
     except ValueError as e:
         raise HTTPException(400, str(e))

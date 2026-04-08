@@ -11,7 +11,10 @@ api.interceptors.request.use(cfg => {
 });
 
 export const authApi = {
-  login: d => api.post('/auth/login', d),
+  login:      d => api.post('/auth/login', d),
+  requestOtp: phone => api.post('/auth/request-otp', { phone }),
+  verifyOtp:  (phone, code, password) =>
+    api.post('/auth/verify-otp-login', { phone, code, ...(password ? { password } : {}) }),
 };
 
 export const serviceApi = {
