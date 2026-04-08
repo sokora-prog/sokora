@@ -1,7 +1,11 @@
+import os
+import secrets
+import string
+import warnings
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import hashlib, hmac, time, json, math, statistics, asyncio
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -22,6 +26,10 @@ models.Base.metadata.create_all(bind=engine)
 models_service.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SOKORA API", version="3.0.0")
+
+_secret = os.getenv("SECRET_KEY", "change-this-secret-in-production")
+if _secret == "change-this-secret-in-production":
+    warnings.warn("⚠️  SECRET_KEY par défaut utilisé — NE PAS déployer en production sans la changer !", RuntimeWarning)
 app.include_router(hotel_router)
 app.include_router(voyage_router)
 app.include_router(promo_router)
@@ -31,17 +39,8 @@ app.include_router(service_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "http://localhost:5176",
-        "http://localhost:5177",
-        "http://localhost:19006",
-        "http://localhost:19000",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -143,37 +142,99 @@ def register_manager(data: schemas.ManagerRegister, db: Session = Depends(get_db
     token = security.create_access_token({"sub": str(manager.id)})
     return {"access_token": token, "token_type": "bearer", "user": manager}
 
+@app.post("/auth/artisan/register", tags=["auth"])
+def register_artisan(data: dict, db: Session = Depends(get_db)):
+    """
+    Inscription publique d'un artisan SOKORA.
+    Body: { full_name, phone_number, password, category_id, city?, neighborhood?, base_price?, price_unit?, description? }
+    """
+    from .models import User, UserRole
+    from .models_service import ServiceProvider
+
+    phone = data.get("phone_number", "").strip()
+    if not phone:
+        raise HTTPException(400, "Numéro de téléphone requis")
+    if db.query(User).filter(User.phone_number == phone).first():
+        raise HTTPException(409, "Ce numéro est déjà enregistré")
+
+    raw_pwd = data.get("password", "")
+    if not raw_pwd or len(raw_pwd) < 6:
+        raise HTTPException(400, "Mot de passe requis (6 caractères minimum)")
+
+    # Créer le compte utilisateur avec hash bcrypt unifié
+    user = User(
+        full_name     = data.get("full_name", "Artisan SOKORA"),
+        phone_number  = phone,
+        password_hash = security.get_password_hash(raw_pwd),
+        role          = UserRole.ARTISAN,
+        is_active     = True,
+    )
+    db.add(user)
+    db.flush()
+
+    # Créer le profil prestataire
+    category_id = data.get("category_id")
+    if category_id:
+        provider = ServiceProvider(
+            user_id       = user.id,
+            name          = user.full_name,
+            phone         = phone,
+            category_id   = int(category_id),
+            city          = data.get("city", "Abidjan"),
+            neighborhood  = data.get("neighborhood"),
+            description   = data.get("description"),
+            base_price    = data.get("base_price"),
+            price_unit    = data.get("price_unit", "prestation"),
+            is_active     = True,
+            is_verified   = False,
+        )
+        db.add(provider)
+
+    db.commit()
+    db.refresh(user)
+
+    token = security.create_access_token({"sub": str(user.id)})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "full_name": user.full_name,
+            "phone_number": user.phone_number,
+            "role": user.role,
+            "is_active": user.is_active,
+            "establishment_id": None,
+            "staff_code": None,
+            "created_at": user.created_at,
+        }
+    }
+
 @app.post("/auth/login", response_model=schemas.Token, tags=["auth"])
 def login(data: schemas.UserLogin, db: Session = Depends(get_db)):
-    # Debug logging (à retirer en production)
-    print(f"[LOGIN ATTEMPT] Phone: {data.phone_number}")
+    print(f"[LOGIN] Tentative: {data.phone_number[:4]}***")
 
     # Nettoyage du numéro de téléphone
     phone_clean = data.phone_number.strip().replace(" ", "").replace("-", "")
-    print(f"[LOGIN ATTEMPT] Cleaned phone: {phone_clean}")
 
     user = db.query(models.User).filter(models.User.phone_number == phone_clean).first()
 
     if not user:
-        print(f"[LOGIN ERROR] User not found: {phone_clean}")
+        print(f"[LOGIN] Échec: raison masquée")
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
-
-    print(f"[LOGIN ATTEMPT] User found: ID={user.id}, Active={user.is_active}")
 
     # Vérification du mot de passe
     password_valid = security.verify_password(data.password, user.password_hash)
-    print(f"[LOGIN ATTEMPT] Password valid: {password_valid}")
 
     if not password_valid:
-        print(f"[LOGIN ERROR] Invalid password for user: {phone_clean}")
+        print(f"[LOGIN] Échec: raison masquée")
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
 
     if not user.is_active:
-        print(f"[LOGIN ERROR] Account disabled: {phone_clean}")
+        print(f"[LOGIN] Échec: raison masquée")
         raise HTTPException(status_code=403, detail="Compte désactivé")
 
     token = security.create_access_token({"sub": str(user.id)})
-    print(f"[LOGIN SUCCESS] Token created for user: {phone_clean}")
+    print(f"[LOGIN] Succès pour user_id={user.id}")
 
     # Enrichir avec infos établissement
     est_name = None
@@ -238,6 +299,83 @@ def _enrich_user_dict(user: models.User, db: Session) -> dict:
 @app.get("/auth/me", tags=["auth"])
 def me(current_user: models.User = Depends(security.get_current_user), db: Session = Depends(get_db)):
     return _enrich_user_dict(current_user, db)
+
+# ── OTP MANAGER AUTH ──────────────────────────────────────────────────────────
+# Stockage OTP en mémoire (reset à chaque redémarrage — OK pour prod car OTP
+# expire en 10 min et le redémarrage force une nouvelle demande)
+_manager_otp_store: dict = {}  # phone -> {code, expires}
+
+@app.post("/auth/request-otp", tags=["auth"])
+def manager_request_otp(data: dict, db: Session = Depends(get_db)):
+    """Génère un OTP 6 chiffres pour connexion gérant/staff.
+    Retourne debug_code en développement. En production, envoie via WhatsApp/SMS."""
+    phone = data.get("phone", "").strip().replace(" ", "").replace("-", "")
+    if not phone:
+        raise HTTPException(400, "Numéro de téléphone requis")
+    code = "".join(secrets.choice(string.digits) for _ in range(6))
+    _manager_otp_store[phone] = {
+        "code": code,
+        "expires": datetime.now(timezone.utc) + timedelta(minutes=10),
+    }
+    user = db.query(models.User).filter(models.User.phone_number == phone).first()
+    is_new = user is None or not user.password_hash
+    # TODO production: send code via WhatsApp/SMS gateway
+    return {"success": True, "debug_code": code, "is_new_user": is_new}
+
+@app.post("/auth/verify-otp-login", tags=["auth"])
+def manager_verify_otp_login(data: dict, db: Session = Depends(get_db)):
+    """Vérifie l'OTP et authentifie (ou crée) le compte gérant.
+    - Si compte nouveau : password requis pour créer le compte
+    - Si compte existant : password requis pour vérifier l'identité
+    - Si needs_password=True dans réponse : le frontend doit demander le mot de passe"""
+    phone    = data.get("phone", "").strip().replace(" ", "").replace("-", "")
+    code     = data.get("code", "").strip()
+    password = data.get("password", "").strip()
+
+    stored = _manager_otp_store.get(phone)
+    if not stored:
+        raise HTTPException(401, "Aucun code en attente — demandez un nouveau code")
+    if datetime.now(timezone.utc) > stored["expires"]:
+        _manager_otp_store.pop(phone, None)
+        raise HTTPException(401, "Code expiré — demandez un nouveau code")
+    if stored["code"] != code:
+        raise HTTPException(401, "Code incorrect")
+
+    user = db.query(models.User).filter(models.User.phone_number == phone).first()
+    is_new = user is None or not user.password_hash
+
+    # Si mot de passe non fourni mais nécessaire → demander au frontend
+    if not password:
+        return {"success": True, "needs_password": True, "is_new_user": is_new, "phone": phone}
+
+    # Créer ou mettre à jour le compte
+    if is_new:
+        if len(password) < 6:
+            raise HTTPException(400, "Mot de passe trop court (6 caractères min)")
+        if not user:
+            user = models.User(
+                full_name    = data.get("full_name", "Gérant SOKORA"),
+                phone_number = phone,
+                role         = models.UserRole.MANAGER,
+                is_active    = True,
+            )
+            db.add(user)
+        user.password_hash = security.get_password_hash(password)
+        user.is_active = True
+        db.commit()
+        db.refresh(user)
+    else:
+        if not security.verify_password(password, user.password_hash):
+            raise HTTPException(401, "Mot de passe incorrect")
+
+    _manager_otp_store.pop(phone, None)
+    token = security.create_access_token({"sub": str(user.id)})
+    return {
+        "success": True,
+        "needs_password": False,
+        "access_token": token,
+        "user": _enrich_user_dict(user, db),
+    }
 
 @app.post("/staff/", response_model=schemas.UserResponse, tags=["staff"])
 def create_staff(data: schemas.UserCreate, current_user: models.User = Depends(security.require_manager), db: Session = Depends(get_db)):
@@ -1033,6 +1171,185 @@ def client_me(request: Request, db: Session = Depends(get_db)):
         "total_spent": client.total_spent,
         "visit_count": client.visit_count,
     }
+
+
+@app.get("/client/dashboard", tags=["client"])
+def client_dashboard(
+    x_client_token: Optional[str] = Header(None, alias="X-Client-Token"),
+    db: Session = Depends(get_db)
+):
+    """
+    Dashboard unifié client SOKORA.
+    Retourne : wallet, tier, upcoming_events, pending_services, loyalty, recent_activity
+    """
+    from .models_hotel import Reservation, ReservationStatus
+    from .models_voyage import VoyageBooking, BookingStatus as VoyageBookingStatus, VoyageTrip
+    from .models_service import ServiceRequest, ServiceRequestStatus
+
+    # ── Authentification client ──────────────────────────────
+    client = None
+    if x_client_token:
+        client = crud.get_client_from_token(db, x_client_token)
+    if not client:
+        raise HTTPException(401, "Token client requis")
+
+    now = datetime.now(timezone.utc)
+
+    # ── Wallet ───────────────────────────────────────────────
+    wallet = db.query(models.WalletAccount).filter(
+        models.WalletAccount.client_id == client.id
+    ).first()
+    balance = wallet.balance if wallet else 0.0
+
+    # ── Tier (basé sur total_spent) ──────────────────────────
+    total_spent = client.total_spent or 0
+    tier = _compute_tier(total_spent)
+
+    # ── Upcoming events (prochains) ──────────────────────────
+    upcoming = []
+
+    # Voyages à venir
+    try:
+        bookings_v = db.query(VoyageBooking).filter(
+            VoyageBooking.client_id == client.id,
+            VoyageBooking.status.in_([VoyageBookingStatus.CONFIRMED, VoyageBookingStatus.BOARDED]),
+        ).all()
+        for b in bookings_v:
+            if b.trip and b.trip.departure_at and b.trip.departure_at >= now:
+                origin = b.trip.route.origin if b.trip.route else "?"
+                destination = b.trip.route.destination if b.trip.route else "?"
+                upcoming.append({
+                    "type": "voyage",
+                    "icon": "🚌",
+                    "title": f"{origin} → {destination}",
+                    "subtitle": b.trip.departure_at.strftime("%d/%m à %H:%M"),
+                    "date": b.trip.departure_at.isoformat(),
+                    "color": "#FF6B35",
+                    "ref": b.qr_token or str(b.id),
+                })
+    except Exception:
+        pass
+
+    # Hôtels à venir
+    try:
+        reservations = db.query(Reservation).filter(
+            Reservation.client_id == client.id,
+            Reservation.status.in_([ReservationStatus.CONFIRMED, ReservationStatus.CHECKED_IN]),
+        ).all()
+        for r in reservations:
+            if r.checkin_date and r.checkin_date >= now.date():
+                hotel_name = r.hotel.name if r.hotel else "Hôtel"
+                upcoming.append({
+                    "type": "hotel",
+                    "icon": "🏨",
+                    "title": hotel_name,
+                    "subtitle": f"Check-in {r.checkin_date.strftime('%d/%m')}",
+                    "date": r.checkin_date.isoformat(),
+                    "color": "#6366F1",
+                    "ref": r.qr_code or str(r.id),
+                })
+    except Exception:
+        pass
+
+    # Services à venir
+    try:
+        svc_requests = db.query(ServiceRequest).filter(
+            ServiceRequest.client_phone == client.phone,
+            ServiceRequest.status.in_([
+                ServiceRequestStatus.CONFIRMED,
+                ServiceRequestStatus.PAID,
+                ServiceRequestStatus.IN_PROGRESS,
+            ]),
+        ).all()
+        for req in svc_requests:
+            if req.scheduled_at and req.scheduled_at >= now:
+                upcoming.append({
+                    "type": "service",
+                    "icon": "🔧",
+                    "title": req.provider.name if req.provider else "Artisan",
+                    "subtitle": req.scheduled_at.strftime("%d/%m à %H:%M"),
+                    "date": req.scheduled_at.isoformat(),
+                    "color": "#00D4AA",
+                    "ref": str(req.id),
+                    "qr_available": req.payment_status.value == "ESCROWED" if req.payment_status else False,
+                })
+    except Exception:
+        pass
+
+    # Trier par date
+    upcoming.sort(key=lambda x: x.get("date", ""))
+
+    # ── Services en attente d'action ─────────────────────────
+    pending_count = 0
+    try:
+        pending_count = db.query(ServiceRequest).filter(
+            ServiceRequest.client_phone == client.phone,
+            ServiceRequest.status == ServiceRequestStatus.PENDING_VALIDATION,
+        ).count()
+    except Exception:
+        pass
+
+    # ── Points de fidélité ────────────────────────────────────
+    loyalty = {
+        "total_points": client.total_points or 0,
+        "total_spent": total_spent,
+        "tier": tier,
+        "next_tier_gap": _next_tier_gap(total_spent),
+    }
+
+    # ── Activité récente (5 dernières transactions wallet) ────
+    recent = []
+    if wallet:
+        txs = db.query(models.WalletTransaction)\
+            .filter(models.WalletTransaction.wallet_id == wallet.id)\
+            .order_by(models.WalletTransaction.created_at.desc())\
+            .limit(5).all()
+        for tx in txs:
+            recent.append({
+                "id": tx.id,
+                "type": tx.tx_type,
+                "amount": tx.amount,
+                "description": tx.description,
+                "service_type": getattr(tx, "service_type", None),
+                "created_at": tx.created_at.isoformat() if tx.created_at else None,
+            })
+
+    return {
+        "wallet": {"balance": balance, "account_number": wallet.account_number if wallet else None},
+        "tier": tier,
+        "loyalty": loyalty,
+        "upcoming_events": upcoming[:5],
+        "pending_services": pending_count,
+        "recent_activity": recent,
+        "client": {
+            "id": client.id,
+            "phone": client.phone,
+            "first_name": client.name or client.phone,
+            "visit_count": client.visit_count or 0,
+        }
+    }
+
+
+def _compute_tier(total_spent: float) -> dict:
+    tiers = [
+        {"name": "Bronze",   "min": 0,       "max": 10000,   "cashback": 1,  "emoji": "🥉", "color": "#CD7F32"},
+        {"name": "Silver",   "min": 10000,   "max": 50000,   "cashback": 2,  "emoji": "🥈", "color": "#9BA0A8"},
+        {"name": "Gold",     "min": 50000,   "max": 200000,  "cashback": 5,  "emoji": "🥇", "color": "#F59E0B"},
+        {"name": "Diamond",  "min": 200000,  "max": 1000000, "cashback": 10, "emoji": "💎", "color": "#00D4AA"},
+        {"name": "Platinum", "min": 1000000, "max": None,    "cashback": 15, "emoji": "👑", "color": "#E5E4E2"},
+    ]
+    for t in reversed(tiers):
+        if total_spent >= t["min"]:
+            return t
+    return tiers[0]
+
+
+def _next_tier_gap(total_spent: float) -> Optional[float]:
+    thresholds = [10000, 50000, 200000, 1000000]
+    for t in thresholds:
+        if total_spent < t:
+            return t - total_spent
+    return None
 
 
 @app.patch("/establishments/{establishment_id}/location", tags=["manager"])

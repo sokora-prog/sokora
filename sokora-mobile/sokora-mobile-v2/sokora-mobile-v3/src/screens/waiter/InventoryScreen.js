@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, Shadow } from '../../utils/constants';
 import { API_URL } from '../../utils/constants';
 import * as SecureStore from 'expo-secure-store';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const fmt  = n => new Intl.NumberFormat('fr-FR').format(n ?? 0) + ' F';
 const fmtN = n => new Intl.NumberFormat('fr-FR').format(n ?? 0);
@@ -111,12 +112,13 @@ export default function InventoryScreen({ navigation }) {
   // ── VUE RÉSULTAT ──────────────────────────────────────────────
   if (view === 'result' && result) return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => { setView('count'); load(); }} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Résultat inventaire</Text>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="Inventaire"
+        subtitle="Résultat inventaire"
+        dark={true}
+        onBack={() => { setView('count'); load(); }}
+      />
       <ScrollView contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 40 }}>
 
         {/* Résumé global */}
@@ -249,18 +251,15 @@ export default function InventoryScreen({ navigation }) {
   // ── VUE LISTE FOURNISSEUR ─────────────────────────────────────
   if (view === 'order' && orderList) return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => setView('result')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Commande fournisseur</Text>
-          <Text style={styles.headerSub}>{orderList.total_items} produit(s)</Text>
-        </View>
-        <TouchableOpacity style={styles.shareBtn} onPress={() => Share.share({ message: buildWhatsAppMsg() })}>
-          <Ionicons name="share-outline" size={20} color={Colors.orange} />
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="Inventaire"
+        subtitle={`Commande fournisseur · ${orderList.total_items} produit(s)`}
+        dark={true}
+        onBack={() => setView('result')}
+        rightIcon="share-outline"
+        onRightPress={() => Share.share({ message: buildWhatsAppMsg() })}
+      />
       <ScrollView contentContainerStyle={{ padding: 20, gap: 12, paddingBottom: 60 }}>
         <View style={styles.orderSummary}>
           <Text style={styles.orderSummaryLabel}>COÛT ESTIMÉ TOTAL</Text>
@@ -315,18 +314,14 @@ export default function InventoryScreen({ navigation }) {
   // ── VUE COMPTAGE ──────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>Inventaire</Text>
-          <Text style={styles.headerSub}>Compté + Cassé par produit</Text>
-        </View>
-        <TouchableOpacity style={styles.shareBtn} onPress={loadOrderList}>
-          <Ionicons name="cart-outline" size={20} color={Colors.orange} />
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="Inventaire"
+        subtitle="Compté + Cassé par produit"
+        dark={true}
+        rightIcon="cart-outline"
+        onRightPress={loadOrderList}
+      />
 
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>

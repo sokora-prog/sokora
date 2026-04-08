@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
 import { promoService } from '../../services/api';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const { width: W } = Dimensions.get('window');
 
@@ -489,19 +490,13 @@ export default function PromoFeedScreen({ navigation }) {
   const ListHeader = () => (
     <>
       {/* ── Header PULSE ── */}
-      <View style={styles.pulseHeader}>
-        <View style={styles.pulseHeaderLeft}>
-          <Text style={styles.pulseLogo}>
-            <Text style={{ color: Colors.orange }}>SOKORA</Text>
-            <Text style={{ color: '#fff' }}> PULSE</Text>
-          </Text>
-          <Text style={styles.pulseSubtitle}>Découvrez les offres du moment</Text>
-        </View>
-        <TouchableOpacity style={styles.notifBtn}>
-          <Ionicons name="notifications-outline" size={22} color="#fff" />
-          <View style={styles.notifDot} />
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="SOKORA PULSE"
+        subtitle="Découvrez les offres du moment"
+        dark={true}
+        rightIcon="notifications-outline"
+      />
 
       {/* ── Stories / Pulses ── */}
       <View style={styles.storiesSection}>

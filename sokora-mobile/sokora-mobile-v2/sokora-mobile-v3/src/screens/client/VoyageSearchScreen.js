@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, TextInput,
+  View, Text, StyleSheet, TouchableOpacity,
   ScrollView, ActivityIndicator, Alert, Platform,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
@@ -12,6 +12,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
 import { API_URL } from '../../utils/constants';
 import { useTranslation } from '../../services/i18n';
+import CityPicker from '../../components/CityPicker';
+import DatePickerModal from '../../components/DatePickerModal';
+import { useGeolocation } from '../../hooks/useGeolocation';
+import ScreenHeader from '../../components/ScreenHeader';
+import CrossSellModal from '../../components/CrossSellModal';
 
 async function getClientToken() {
   if (Platform.OS === 'web') return localStorage.getItem('sokora_client_token');
@@ -28,11 +33,13 @@ const POPULAR_ROUTES = [
 
 export default function VoyageSearchScreen({ navigation, clientToken }) {
   const { t } = useTranslation();
+  const { coords } = useGeolocation({ autoRequest: true });
   const [origin, setOrigin]           = useState('');
   const [destination, setDestination] = useState('');
   const [date, setDate]               = useState('');
   const [loading, setLoading]         = useState(false);
   const [results, setResults]         = useState(null);
+  const [showCrossSell, setShowCrossSell] = useState(false);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -49,10 +56,17 @@ export default function VoyageSearchScreen({ navigation, clientToken }) {
         destination: destination.trim(),
         ...(date ? { date } : {}),
       });
+      if (coords) {
+        params.append('client_lat', coords.latitude);
+        params.append('client_lng', coords.longitude);
+      }
       const res = await fetch(`${API_URL}/voyage/search?${params}`);
       if (!res.ok) throw new Error('Erreur de recherche');
       const data = await res.json();
       setResults(data);
+      if (data.length > 0) {
+        setTimeout(() => setShowCrossSell(true), 2000);
+      }
     } catch (e) {
       Alert.alert('Erreur', e.message);
     } finally {
@@ -74,24 +88,27 @@ export default function VoyageSearchScreen({ navigation, clientToken }) {
   };
 
   return (
+    <>
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
       {/* ── Header ── */}
-      <View style={styles.header}>
-        <Text style={styles.title}>🚌 {t('voyage.search')}</Text>
-        <Text style={styles.subtitle}>Transport interurbain en Côte d'Ivoire</Text>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="🚌 Transport"
+        subtitle="Transport interurbain en Côte d'Ivoire"
+        dark={true}
+      />
 
       {/* ── Formulaire recherche ── */}
       <View style={styles.searchCard}>
         {/* Départ */}
-        <View style={styles.inputRow}>
-          <View style={[styles.inputDot, { backgroundColor: Colors.green }]} />
-          <TextInput
-            style={styles.input}
-            placeholder={t('voyage.from')}
-            placeholderTextColor={Colors.textFaint}
+        <View style={{ marginBottom: Spacing.sm }}>
+          <CityPicker
             value={origin}
-            onChangeText={setOrigin}
+            onChange={setOrigin}
+            placeholder={t('voyage.from')}
+            label="Ville de départ"
+            iconName="radio-button-on-outline"
+            iconColor={Colors.green}
           />
         </View>
 
@@ -105,28 +122,26 @@ export default function VoyageSearchScreen({ navigation, clientToken }) {
         </View>
 
         {/* Destination */}
-        <View style={styles.inputRow}>
-          <View style={[styles.inputDot, { backgroundColor: Colors.red }]} />
-          <TextInput
-            style={styles.input}
-            placeholder={t('voyage.to')}
-            placeholderTextColor={Colors.textFaint}
+        <View style={{ marginBottom: Spacing.sm }}>
+          <CityPicker
             value={destination}
-            onChangeText={setDestination}
+            onChange={setDestination}
+            placeholder={t('voyage.to')}
+            label="Ville d'arrivée"
+            iconName="location"
+            iconColor={Colors.red}
           />
         </View>
 
         {/* Date */}
-        <View style={[styles.inputRow, { marginTop: Spacing.sm }]}>
-          <Ionicons name="calendar-outline" size={18} color={Colors.textMuted} style={{ marginRight: 8 }} />
-          <TextInput
-            style={styles.input}
-            placeholder={`Date (ex: ${today})`}
-            placeholderTextColor={Colors.textFaint}
-            value={date}
-            onChangeText={setDate}
-          />
-        </View>
+        <DatePickerModal
+          value={date}
+          onChange={setDate}
+          placeholder="Choisir une date de départ"
+          label="Date de départ"
+          minDate={today}
+          style={{ marginTop: Spacing.sm }}
+        />
 
         {/* Bouton rechercher */}
         <TouchableOpacity style={styles.searchBtn} onPress={handleSearch} disabled={loading}>
@@ -238,6 +253,15 @@ export default function VoyageSearchScreen({ navigation, clientToken }) {
         </View>
       )}
     </ScrollView>
+
+    <CrossSellModal
+      visible={showCrossSell}
+      onClose={() => setShowCrossSell(false)}
+      type="voyage"
+      context={{ city: destination }}
+      navigation={navigation}
+    />
+    </>
   );
 }
 

@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
 import { useAuth } from '../../services/AuthContext';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const { width: W } = Dimensions.get('window');
 
@@ -240,13 +241,7 @@ export default function PremiumProfileScreen({ navigation }) {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Ma Conciergerie</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <ScreenHeader navigation={navigation} title="Mon profil" dark={true} />
 
       <Animated.ScrollView
         showsVerticalScrollIndicator={false}

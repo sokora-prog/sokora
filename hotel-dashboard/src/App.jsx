@@ -32,6 +32,15 @@ const C = {
   goldPale:     '#F59E0B12',
 };
 
+const CI_CITIES = [
+  'Abidjan','Yamoussoukro','Bouaké','Daloa','San-Pédro','Korhogo','Man','Gagnoa',
+  'Abengourou','Divo','Soubré','Odienné','Bondoukou','Séguéla','Ferkessédougou',
+  'Katiola','Aboisso','Adzopé','Agboville','Anyama','Bingerville','Grand-Bassam',
+  'Grand-Lahou','Guiglo','Issia','Jacqueville','Lakota','Sassandra','Tiassalé',
+  'Toumodi','Vavoua','Zuénoula','Tabou','Boundiali','Tengréla','Bouna','Dabou',
+  'Duekoué','Sinfra','Oumé','Dimbokro','Bongouanou',
+];
+
 const ROOM_STATUS_CONFIG = {
   AVAILABLE:   { label: 'Disponible',  bg: C.greenPale,  c: C.green,  dot: C.green },
   OCCUPIED:    { label: 'Occupée',     bg: C.orangePale, c: C.orange, dot: C.orange },
@@ -438,48 +447,35 @@ const SokoraLogo = ({ size = 'md' }) => {
    LOGIN SCREEN
 ═══════════════════════════════════════════════════════════════ */
 function LoginScreen({ onLogin }) {
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone]       = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
+
+  const inputStyle = { width:'100%', padding:'12px 14px', borderRadius:10, background:'#0b1829', border:`1.5px solid ${C.border}`, color:C.white, fontSize:14, outline:'none', fontFamily:'inherit', boxSizing:'border-box' };
 
   const handleLogin = async () => {
     if (!phone || !password) return;
     setLoading(true); setError('');
     try {
       const { data } = await authApi.login(phone, password);
-      if (data.user.role !== 'MANAGER' && data.user.role !== 'SUPER_ADMIN') {
-        setError('Accès réservé aux gérants');
-        return;
-      }
       localStorage.setItem('hotel_token', data.access_token);
       localStorage.setItem('hotel_user', JSON.stringify(data.user));
       onLogin(data.user);
     } catch (e) {
-      setError(e.response?.data?.detail || 'Identifiants incorrects');
+      setError(e.response?.data?.detail || 'Numéro ou mot de passe incorrect');
     } finally { setLoading(false); }
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: C.bg,
-      display: 'flex',
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', position: 'relative', overflow: 'hidden' }}>
       {/* Panel gauche — décoratif */}
       <div style={{
         width: '45%',
         background: `linear-gradient(160deg, #0F1E3A 0%, #0f1e35 100%)`,
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        padding: '60px 50px',
-        position: 'relative',
-        overflow: 'hidden',
+        display: 'flex', flexDirection: 'column', justifyContent: 'center',
+        padding: '60px 50px', position: 'relative', overflow: 'hidden',
       }}>
-        {/* Cercles décoratifs */}
         <div style={{ position: 'absolute', top: -80, right: -80, width: 300, height: 300, borderRadius: '50%', background: `${C.orange}15`, border: `1px solid ${C.orange}22` }} />
         <div style={{ position: 'absolute', bottom: -60, left: -60, width: 200, height: 200, borderRadius: '50%', background: `${C.teal}10` }} />
 
@@ -505,49 +501,33 @@ function LoginScreen({ onLogin }) {
         </div>
       </div>
 
-      {/* Panel droit — formulaire */}
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 40,
-      }}>
-        <div className="fade-in" style={{ width: '100%', maxWidth: 400 }}>
-          <div style={{ marginBottom: 36 }}>
-            <h2 style={{ fontSize: 26, fontWeight: 800, color: C.white, marginBottom: 8 }}>
-              Espace Gérant
-            </h2>
-            <p style={{ fontSize: 13, color: C.muted }}>
-              Connectez-vous à votre tableau de bord hôtelier
-            </p>
+      {/* Panel droit — formulaire login */}
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:40 }}>
+        <div className="fade-in" style={{ width:'100%', maxWidth:400 }}>
+
+          <div style={{ marginBottom:32 }}>
+            <h2 style={{ fontSize:24, fontWeight:800, color:C.white, marginBottom:6 }}>Espace Gérant Hôtel</h2>
+            <p style={{ fontSize:13, color:C.muted }}>Connectez-vous pour accéder à votre tableau de bord hôtel</p>
           </div>
 
-          <ErrorBox msg={error} />
+          {error && <div style={{ padding:'10px 14px', borderRadius:8, background:'#ef444418', border:'1px solid #ef444440', color:'#f87171', fontSize:12, marginBottom:20 }}>{error}</div>}
 
-          <Field label="Numéro de téléphone">
-            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="0700000000" type="tel" />
-          </Field>
-          <Field label="Mot de passe">
-            <input
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••"
-              type="password"
-              onKeyDown={e => e.key === 'Enter' && handleLogin()}
-            />
-          </Field>
+          <div style={{ marginBottom:16 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:C.muted, display:'block', marginBottom:6 }}>Numéro de téléphone</label>
+            <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="0700000000" style={inputStyle} onKeyDown={e => e.key==='Enter' && handleLogin()} autoFocus />
+          </div>
 
-          <OrangeBtn
-            onClick={handleLogin}
-            disabled={loading || !phone || !password}
-            style={{ width: '100%', justifyContent: 'center', padding: '13px 20px', marginTop: 8, fontSize: 14 }}
-          >
+          <div style={{ marginBottom:24 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:C.muted, display:'block', marginBottom:6 }}>Mot de passe</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mot de passe" style={inputStyle} onKeyDown={e => e.key==='Enter' && handleLogin()} autoComplete="new-password" />
+          </div>
+
+          <OrangeBtn onClick={handleLogin} disabled={loading || !phone || !password} style={{ width:'100%', justifyContent:'center', padding:'13px 20px', fontSize:14 }}>
             {loading ? <Spinner size={18} color={C.white} /> : 'Se connecter →'}
           </OrangeBtn>
 
-          <p style={{ textAlign: 'center', fontSize: 11, color: C.muted, marginTop: 28 }}>
-            SOKORA Pro · Hôtellerie Africaine · v2.0
+          <p style={{ textAlign:'center', fontSize:11, color:C.muted, marginTop:28 }}>
+            SOKORA Hôtel · Hôtellerie Africaine · v3.0
           </p>
         </div>
       </div>
@@ -614,7 +594,10 @@ function SetupHotel({ onDone }) {
               <input value={form.name} onChange={e => upd('name', e.target.value)} placeholder="Grand Hôtel Abidjan" />
             </Field>
             <Field label="Ville">
-              <input value={form.city} onChange={e => upd('city', e.target.value)} />
+              <select value={form.city} onChange={e => upd('city', e.target.value)}>
+                <option value="">— Choisir une ville —</option>
+                {CI_CITIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
             </Field>
           </div>
           <Field label="Adresse *">

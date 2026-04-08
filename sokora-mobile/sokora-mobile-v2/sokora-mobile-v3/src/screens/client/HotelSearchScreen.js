@@ -13,6 +13,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { API_URL } from '../../utils/constants';
 import { Colors, Spacing, Radius, Shadow, Typography } from '../../utils/constants';
+import DatePickerModal from '../../components/DatePickerModal';
+import { useGeolocation, formatDistance } from '../../hooks/useGeolocation';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const { width: W } = Dimensions.get('window');
 
@@ -84,6 +87,7 @@ export default function HotelSearchScreen({ navigation }) {
   const [error,     setError]     = useState(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const { coords } = useGeolocation({ autoRequest: true });
 
   useFocusEffect(useCallback(() => { fetchHotels(); }, [checkin, checkout]));
 
@@ -99,6 +103,10 @@ export default function HotelSearchScreen({ navigation }) {
         checkin_date: checkin,
         checkout_date: checkout,
       });
+      if (coords) {
+        params.append('client_lat', coords.latitude);
+        params.append('client_lng', coords.longitude);
+      }
       const res = await fetch(`${API_URL}/hotel/nearby?${params}`);
       if (res.ok) {
         const data = await res.json();
@@ -134,35 +142,34 @@ export default function HotelSearchScreen({ navigation }) {
   return (
     <View style={s.root}>
       {/* ── Header ── */}
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>Hôtels & Résidences</Text>
-          <Text style={s.headerSub}>{checkin} → {checkout} · {nights} nuit{nights > 1 ? 's' : ''}</Text>
-        </View>
-      </View>
+      <ScreenHeader
+        navigation={navigation}
+        title="🏨 Hôtels"
+        subtitle="Trouvez votre hébergement en Côte d'Ivoire"
+        dark={true}
+      />
 
       {/* ── Dates ── */}
       <View style={s.datesRow}>
         <View style={s.dateBox}>
           <Text style={s.dateLabel}>📅 Arrivée</Text>
-          <TextInput
-            style={s.dateInput}
+          <DatePickerModal
             value={checkin}
-            onChangeText={setCheckin}
-            placeholder="AAAA-MM-JJ"
+            onChange={setCheckin}
+            placeholder="Date d'arrivée"
+            label="Date d'arrivée"
+            minDate={today}
           />
         </View>
         <Ionicons name="arrow-forward" size={18} color={BRAND.muted} />
         <View style={s.dateBox}>
           <Text style={s.dateLabel}>📅 Départ</Text>
-          <TextInput
-            style={s.dateInput}
+          <DatePickerModal
             value={checkout}
-            onChangeText={setCheckout}
-            placeholder="AAAA-MM-JJ"
+            onChange={setCheckout}
+            placeholder="Date de départ"
+            label="Date de départ"
+            minDate={checkin || today}
           />
         </View>
         <TouchableOpacity style={s.searchDateBtn} onPress={fetchHotels}>
@@ -187,18 +194,18 @@ export default function HotelSearchScreen({ navigation }) {
             </TouchableOpacity>
           )}
         </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 10 }}>
+          {SORTS.map(sort => (
+            <TouchableOpacity
+              key={sort.id}
+              style={[s.sortChip, sortBy === sort.id && s.sortChipActive]}
+              onPress={() => setSortBy(sort.id)}
+            >
+              <Text style={[s.sortChipTxt, sortBy === sort.id && s.sortChipTxtActive]}>{sort.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.sortRow} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
-        {SORTS.map(sort => (
-          <TouchableOpacity
-            key={sort.id}
-            style={[s.sortChip, sortBy === sort.id && s.sortChipActive]}
-            onPress={() => setSortBy(sort.id)}
-          >
-            <Text style={[s.sortChipTxt, sortBy === sort.id && s.sortChipTxtActive]}>{sort.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
 
       {/* ── Liste ── */}
       {loading ? (
@@ -276,6 +283,16 @@ function HotelCard({ hotel, nights, onPress }) {
             <Text style={sc.dist}>{hotel.distance_km.toFixed(1)} km</Text>
           )}
         </View>
+        {hotel.distance_km != null && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 }}>
+            <Ionicons name="navigate-outline" size={11} color="#00D4AA" />
+            <Text style={{ fontSize: 11, color: '#00D4AA', fontWeight: '700' }}>
+              {hotel.distance_km < 1
+                ? `${Math.round(hotel.distance_km * 1000)} m`
+                : `${hotel.distance_km.toFixed(1)} km`} de vous
+            </Text>
+          </View>
+        )}
 
         {/* Types de chambres disponibles */}
         {hotel.available_rooms && hotel.available_rooms.length > 0 && (
@@ -378,7 +395,8 @@ const s = StyleSheet.create({
   },
 
   toolbar: {
-    backgroundColor: BRAND.surface, paddingHorizontal: 16, paddingVertical: 10,
+    backgroundColor: BRAND.surface, paddingHorizontal: 16,
+    paddingTop: 10, paddingBottom: 14,
     borderBottomWidth: 1, borderBottomColor: BRAND.border,
   },
   searchBar: {

@@ -16,6 +16,8 @@ import { API_URL } from '../../utils/constants';
 import { Shadow, Radius } from '../../utils/constants';
 import { walletService } from '../../services/api';
 import { useAuth } from '../../services/AuthContext';
+import ScreenHeader from '../../components/ScreenHeader';
+import ReceiptModal from '../../components/ReceiptModal';
 
 async function getClientToken() {
   if (Platform.OS === 'web') return localStorage.getItem('sokora_client_token');
@@ -71,11 +73,13 @@ export default function HotelDetailScreen({ route, navigation }) {
   const [loading,     setLoading]     = useState(true);
   const [activeTab,   setActiveTab]   = useState('rooms');
   const [selectedRoom,setSelectedRoom]= useState(null);
-  const [bookModal,   setBookModal]   = useState(false);
-  const [guests,      setGuests]      = useState('1');
-  const [requests,    setRequests]    = useState('');
-  const [booking,     setBooking]     = useState(false);
-  const [confirmed,   setConfirmed]   = useState(null);
+  const [bookModal,    setBookModal]    = useState(false);
+  const [guests,       setGuests]       = useState('1');
+  const [requests,     setRequests]     = useState('');
+  const [booking,      setBooking]      = useState(false);
+  const [confirmed,    setConfirmed]    = useState(null);
+  const [showReceipt,  setShowReceipt]  = useState(false);
+  const [hotelReceipt, setHotelReceipt] = useState(null);
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const bannerH = scrollY.interpolate({ inputRange: [0, 160], outputRange: [200, 100], extrapolate: 'clamp' });
@@ -126,7 +130,7 @@ export default function HotelDetailScreen({ route, navigation }) {
       });
       const data = await res.json();
       if (res.ok) {
-        setConfirmed({
+        const confirmedData = {
           ...data,
           hotel_name:    data.hotel_name    ?? hotel?.name ?? 'Hôtel SOKORA',
           room_number:   data.room_number   ?? selectedRoom.room_number ?? '101',
@@ -134,7 +138,19 @@ export default function HotelDetailScreen({ route, navigation }) {
           checkout_date: data.checkout_date ?? checkout,
           status:        data.status        ?? 'CONFIRMED',
           qr_code:       data.qr_code,
+        };
+        setConfirmed(confirmedData);
+        setHotelReceipt({
+          hotel_name:    confirmedData.hotel_name,
+          room_type:     selectedRoom?.room_type ?? data.room_type ?? '',
+          room_number:   confirmedData.room_number,
+          checkin_date:  confirmedData.checkin_date,
+          checkout_date: confirmedData.checkout_date,
+          nights:        nights,
+          amount:        data.total_price ?? (selectedRoom?.price_per_night ?? 0) * (nights || 1),
+          qr_token:      data.qr_code,
         });
+        setShowReceipt(true);
         setBookModal(false);
       } else {
         Alert.alert('Réservation impossible', data.detail ?? 'Veuillez réessayer.');
@@ -160,20 +176,30 @@ export default function HotelDetailScreen({ route, navigation }) {
 
   return (
     <View style={s.root}>
+      <ReceiptModal
+        visible={showReceipt}
+        onClose={() => setShowReceipt(false)}
+        receipt={hotelReceipt}
+        type="hotel"
+      />
       {/* ── Banner animé ── */}
       <Animated.View style={[s.banner, { height: bannerH }]}>
         <Animated.View style={[s.bannerEmoji, { opacity: bannerOp }]}>
           <Text style={{ fontSize: 72 }}>🏨</Text>
         </Animated.View>
-        <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
         {hotel?.is_premium && (
           <View style={s.premiumBadge}>
             <Text style={s.premiumTxt}>✨ Premium</Text>
           </View>
         )}
       </Animated.View>
+      <ScreenHeader
+        navigation={navigation}
+        title={hotel?.name || 'Hôtel'}
+        subtitle={hotel?.city || ''}
+        dark={true}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}
+      />
 
       <Animated.ScrollView
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}

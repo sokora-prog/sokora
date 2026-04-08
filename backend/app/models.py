@@ -17,6 +17,7 @@ class UserRole(str, enum.Enum):
     MANAGER     = "MANAGER"
     WAITER      = "WAITER"
     DRIVER      = "DRIVER"
+    ARTISAN     = "ARTISAN"
     CLIENT      = "CLIENT"
 
 

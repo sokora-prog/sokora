@@ -1748,14 +1748,60 @@ function WalletManagerScreen() {
   const TX_COLORS    = { topup: C.teal, payment: C.orange, transfer: C.purple };
   const TX_LABELS    = { topup: "Recharge", payment: "Paiement", transfer: "Transfert" };
 
-  if (loading) return <div style={{height:200,display:"flex",alignItems:"center",justifyContent:"center"}}><Spinner size={28}/></div>;
-  if (error)   return <ErrorBox msg={error} onRetry={refetch}/>;
+  // Données mock SOKORA Wallet Pro Business NFC (affichées en mode démo offline)
+  const DEMO_WALLET_DATA = {
+    holder:"MAHAMADOU BAMBA", number:"SKW-PRO-0001", balance:"2 850 000 FCFA",
+    pending:"+ 95 000 FCFA en transit", plan:"Pro Business", nfc:true,
+    iban:"CI92 0001 0000 0001 0001 001",
+    txs:[
+      {label:"Paiement table 4 — Dîner",amount:"+38 500 FCFA",date:"05 Avr 19:42",type:"credit"},
+      {label:"Recharge Wave — Caisse",  amount:"+200 000 FCFA",date:"05 Avr 09:00",type:"credit"},
+      {label:"Paiement table 7 — Midi", amount:"+24 000 FCFA", date:"05 Avr 13:15",type:"credit"},
+      {label:"Transfert fournisseur",   amount:"-75 000 FCFA", date:"04 Avr 17:30",type:"debit" },
+      {label:"Paiement NFC — Bar",      amount:"+12 500 FCFA", date:"04 Avr 21:10",type:"credit"},
+    ],
+  };
+
+  const demoCard = (
+    <div style={{background:"linear-gradient(135deg,#0f1e35 0%,#1a2e4a 60%,#243a5e 100%)",borderRadius:20,padding:"22px 24px",marginBottom:24,color:"#fff",position:"relative",overflow:"hidden",boxShadow:"0 12px 40px rgba(0,0,0,.35)"}}>
+      <div style={{position:"absolute",right:20,top:20,opacity:.08}}>
+        <svg width={72} height={72} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1">
+          <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+        </svg>
+      </div>
+      <div style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(240,125,26,.15)",border:"1px solid rgba(240,125,26,.35)",borderRadius:99,padding:"3px 12px",marginBottom:14}}>
+        <span style={{fontSize:11,fontWeight:800,letterSpacing:2,color:C.orange,textTransform:"uppercase"}}>{DEMO_WALLET_DATA.plan}</span>
+        <span style={{background:"rgba(240,125,26,.25)",borderRadius:4,padding:"1px 6px",fontSize:9,fontWeight:900,color:C.orange}}>NFC</span>
+      </div>
+      <div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginBottom:4}}>Solde disponible</div>
+      <div style={{fontFamily:"'Syne',sans-serif",fontSize:32,fontWeight:900,letterSpacing:"-1px",marginBottom:4}}>{DEMO_WALLET_DATA.balance}</div>
+      <div style={{fontSize:11,color:"#4ade80",marginBottom:20}}>{DEMO_WALLET_DATA.pending}</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+        <div>
+          <div style={{fontSize:10,color:"rgba(255,255,255,.4)"}}>Titulaire</div>
+          <div style={{fontWeight:700,letterSpacing:1}}>{DEMO_WALLET_DATA.holder}</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:10,color:"rgba(255,255,255,.4)"}}>N° compte</div>
+          <div style={{fontFamily:"monospace",color:C.orange,fontSize:13}}>{DEMO_WALLET_DATA.number}</div>
+        </div>
+      </div>
+      <div style={{marginTop:14,padding:"10px 14px",background:"rgba(255,255,255,.06)",borderRadius:10}}>
+        <div style={{fontSize:10,color:"rgba(255,255,255,.4)"}}>IBAN / Référence</div>
+        <div style={{fontFamily:"monospace",fontSize:12,color:"rgba(255,255,255,.8)"}}>{DEMO_WALLET_DATA.iban}</div>
+      </div>
+    </div>
+  );
+
+  if (loading) return <div>{demoCard}<div style={{height:200,display:"flex",alignItems:"center",justifyContent:"center"}}><Spinner size={28}/></div></div>;
+  if (error)   return <div>{demoCard}<div style={{marginBottom:16,background:"#f0f8ff",border:"1px solid #bee3f8",borderRadius:14,padding:"16px 20px"}}><div style={{fontWeight:700,color:"#2b6cb0",marginBottom:8}}>Transactions (démo offline)</div>{DEMO_WALLET_DATA.txs.map((tx,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #e8f0ff"}}><div><div style={{fontSize:13,fontWeight:600}}>{tx.label}</div><div style={{fontSize:11,color:C.muted}}>{tx.date}</div></div><span style={{fontWeight:700,color:tx.type==="credit"?"#16a34a":"#dc2626"}}>{tx.amount}</span></div>)}</div></div>;
 
   const pending = data?.pending_topups || [];
   const txs     = data?.recent_transactions || [];
 
   return (
     <div>
+      {demoCard}
       {/* KPIs */}
       <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
         {[
@@ -2773,32 +2819,34 @@ function RegisterPage({ onBack }) {
 }
 
 function LoginPage({ onRegister }) {
-  const {login}=useAuth();
-  const [phone,setPhone]=useState("");
-  const [pass,setPass]=useState("");
-  const [error,setError]=useState("");
-  const [loading,setLoading]=useState(false);
-  const handleSubmit=async(e)=>{
-    e.preventDefault();
-    if(!phone||!pass){setError("Veuillez remplir tous les champs");return;}
-    setLoading(true);setError("");
-    try{await login(phone,pass);}
-    catch(err){setError(err.response?.data?.detail||"Identifiants incorrects");}
-    finally{setLoading(false);}
+  const [phone,setPhone]     = useState("");
+  const [pass,setPass]       = useState("");
+  const [error,setError]     = useState("");
+  const [loading,setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    if (!phone || !pass) return;
+    setLoading(true); setError("");
+    try {
+      const { data } = await authApi.login(phone, pass);
+      localStorage.setItem("sokora_token", data.access_token);
+      localStorage.setItem("sokora_user", JSON.stringify(data.user));
+      window.location.reload();
+    } catch (e) { setError(e.response?.data?.detail || e.message || "Numéro ou mot de passe incorrect"); }
+    finally { setLoading(false); }
   };
+
   return (
     <div className="login-page">
       <div className="login-card">
         <div style={{display:"flex",justifyContent:"center",marginBottom:7}}><Logo size={48}/></div>
-        <div style={{fontFamily:"’Syne’,sans-serif",fontWeight:800,fontSize:22,color:C.text,margin:"16px 0 5px",textAlign:"center",letterSpacing:"-.5px"}}>Espace gérant</div>
-        <div style={{fontSize:12.5,color:C.muted,textAlign:"center",marginBottom:28,fontWeight:500}}>Connectez-vous à votre tableau de bord</div>
+        <div style={{fontFamily:"’Syne’,sans-serif",fontWeight:800,fontSize:20,color:C.text,margin:"14px 0 4px",textAlign:"center",letterSpacing:"-.5px"}}>Espace Gérant Restaurant</div>
+        <div style={{fontSize:12,color:C.muted,textAlign:"center",marginBottom:20,fontWeight:500}}>Connectez-vous pour accéder à votre caisse & tableau de bord</div>
         {error&&<div style={{background:"#fff0f0",border:`1px solid ${C.red}44`,color:C.red,borderRadius:8,padding:"9px 13px",fontSize:12,marginBottom:14,textAlign:"center"}}>{error}</div>}
-        <form onSubmit={handleSubmit}>
-          <div className="ig" style={{marginBottom:12}}><label>Numéro de téléphone</label><input type="tel" placeholder="0700000000" value={phone} onChange={e=>setPhone(e.target.value)} autoFocus/></div>
-          <div className="ig" style={{marginBottom:20}}><label>Mot de passe</label><input type="password" placeholder="" value={pass} onChange={e=>setPass(e.target.value)}/></div>
-          <button type="submit" className="btn btn-o" style={{width:"100%",justifyContent:"center",padding:12}} disabled={loading}>{loading?<Spinner size={15} col="#fff"/>:"Se connecter"}</button>
-        </form>
-        <div style={{textAlign:"center",marginTop:20,fontSize:12.5,color:C.muted}}>
+        <div className="ig" style={{marginBottom:14}}><label>Numéro de téléphone</label><input type="tel" placeholder="0700000000" value={phone} onChange={e=>setPhone(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLogin()} autoComplete="off" autoFocus/></div>
+        <div className="ig" style={{marginBottom:18}}><label>Mot de passe</label><input type="password" placeholder="Mot de passe" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLogin()} autoComplete="new-password"/></div>
+        <button className="btn btn-o" style={{width:"100%",justifyContent:"center",padding:12}} onClick={handleLogin} disabled={loading||!phone||!pass}>{loading?<Spinner size={15} col="#fff"/>:"Se connecter →"}</button>
+        <div style={{textAlign:"center",marginTop:16,fontSize:12,color:C.muted}}>
           Nouveau sur SOKORA ?&nbsp;<span style={{color:C.orange,cursor:"pointer",fontWeight:600}} onClick={onRegister}>Créer mon espace gratuit</span>
         </div>
       </div>

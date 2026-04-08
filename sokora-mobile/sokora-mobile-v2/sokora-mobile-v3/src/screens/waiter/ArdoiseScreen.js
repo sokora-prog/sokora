@@ -8,6 +8,7 @@ import { API_URL } from '../../utils/constants';
 import * as SecureStore from 'expo-secure-store';
 import { notificationService } from '../../services/notifications';
 import { Platform } from 'react-native';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const C = {
   navy:    '#0f1e35',
@@ -198,10 +199,14 @@ export default function ArdoiseScreen({ navigation }) {
     return (
       <View style={styles.container}>
         {/* Header */}
+        <ScreenHeader
+          navigation={navigation}
+          title="Ardoise crédit"
+          subtitle={selected.client_name}
+          dark={true}
+          onBack={() => setView('list')}
+        />
         <View style={styles.detailHeader}>
-          <TouchableOpacity onPress={() => setView('list')} style={styles.backBtn}>
-            <Text style={styles.backTxt}>← Retour</Text>
-          </TouchableOpacity>
           <Text style={styles.detailName}>{selected.client_name}</Text>
           <Text style={styles.detailPhone}>{selected.client_phone || 'Pas de numéro'}</Text>
           {selected.credit_limit ? (
@@ -356,6 +361,7 @@ export default function ArdoiseScreen({ navigation }) {
   // ── VUE LISTE ───────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
+      <ScreenHeader navigation={navigation} title="Ardoise crédit" dark={true} />
       {/* Barre recherche + nouveau */}
       <View style={styles.toolbar}>
         <TextInput

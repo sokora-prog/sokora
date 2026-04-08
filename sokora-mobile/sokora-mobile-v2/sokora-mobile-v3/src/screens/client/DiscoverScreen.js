@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
 import { discoverService } from '../../services/api';
+import ScreenHeader from '../../components/ScreenHeader';
 
 const { width: W } = Dimensions.get('window');
 
@@ -308,17 +309,12 @@ export default function DiscoverScreen({ navigation }) {
   if (loading) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <View>
-              <Text style={styles.headerTitle}>SOKORA EXPLORE</Text>
-              <View style={styles.locationRow}>
-                <Ionicons name="location" size={13} color={Colors.orange} />
-                <Text style={styles.locationText}>Abidjan, Côte d'Ivoire</Text>
-              </View>
-            </View>
-          </View>
-        </View>
+        <ScreenHeader
+          navigation={navigation}
+          title="Explorer"
+          subtitle="Découvrez les établissements SOKORA"
+          dark={true}
+        />
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}>
           <ActivityIndicator size="large" color={Colors.orange} />
           <Text style={{ color: Colors.textMuted, fontSize: 14 }}>Chargement des établissements...</Text>
@@ -330,22 +326,14 @@ export default function DiscoverScreen({ navigation }) {
   return (
     <View style={styles.container}>
       {/* ── Header ── */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.headerTitle}>SOKORA EXPLORE</Text>
-            <View style={styles.locationRow}>
-              <Ionicons name="location" size={13} color={Colors.orange} />
-              <Text style={styles.locationText}>
-                {hasGPS ? 'Abidjan, Côte d\'Ivoire' : 'Activez le GPS'}
-              </Text>
-            </View>
-          </View>
-          <TouchableOpacity style={styles.mapToggle} onPress={() => {}}>
-            <Ionicons name="map-outline" size={22} color={Colors.orange} />
-          </TouchableOpacity>
-        </View>
-
+      <ScreenHeader
+        navigation={navigation}
+        title="Explorer"
+        subtitle="Découvrez les établissements SOKORA"
+        dark={true}
+        rightIcon="map-outline"
+        onRightPress={() => {}}
+      >
         {/* Barre de recherche */}
         <View style={styles.searchBar}>
           <Ionicons name="search-outline" size={18} color={Colors.textMuted} />
@@ -362,7 +350,7 @@ export default function DiscoverScreen({ navigation }) {
             </TouchableOpacity>
           ) : null}
         </View>
-      </View>
+      </ScreenHeader>
 
       <FlatList
         data={filtered}

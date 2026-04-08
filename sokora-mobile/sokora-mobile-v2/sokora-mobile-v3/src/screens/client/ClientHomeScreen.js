@@ -1,7 +1,6 @@
 /**
- * ClientHomeScreen v2 — SOKORA Client App
- * Dashboard central premium : Wallet masquable, Cashback gauge, Scan flottant
- * Charte graphique SOKORA officielle : #F26D21 / #3065A6 / #7AA6D4
+ * ClientHomeScreen v3 — SOKORA MaxIT Design
+ * Charte prototype : header blanc, wallet gradient sombre, pills colorées
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -13,41 +12,36 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../services/AuthContext';
 import { useTranslation } from '../../services/i18n';
-import { walletService, dashboardService } from '../../services/api';
-import { Colors, Typography, Spacing, Radius, Shadow } from '../../utils/constants';
+import { walletService, clientDashboardService } from '../../services/api';
 import { API_URL } from '../../utils/constants';
 import QRCode from 'react-native-qrcode-svg';
 import * as SecureStore from 'expo-secure-store';
 
 const { width: W } = Dimensions.get('window');
 
-// ── Palette officielle ────────────────────────────────────────────────────────
-const BRAND = {
-  orange:    '#F26D21',
-  orangeL:   '#F9A050',
-  blue:      '#3065A6',
-  blueL:     '#7AA6D4',
-  navy:      '#1A2E4A',
-  bg:        '#F2F5FB',
-  surface:   '#FFFFFF',
-  border:    '#DDE4F0',
-  text:      '#1A2E4A',
-  muted:     '#7A8FAB',
-  gold:      '#F59E0B',
+// ── Palette MaxIT (prototype) ────────────────────────────────────────────────
+const C = {
+  navy:    '#0F1E35',
+  navy2:   '#133050',
+  navy3:   '#0a4a38',
+  orange:  '#FF6B35',
+  orangeL: '#ff8c5a',
+  teal:    '#00D4AA',
+  tealD:   '#00b894',
+  gold:    '#FFB800',
+  purple:  '#6C63FF',
+  bg:      '#F4F6F9',
+  white:   '#FFFFFF',
+  textD:   '#1A1A2E',
+  textG:   '#8892A4',
+  cardD:   '#1A2E45',
 };
-
-const SERVICES = [
-  { id: 'hotel',    icon: '🏨', label: 'Hôtels',   sub: 'Disponibilités temps réel', tab: null,       screen: 'HotelSearch',  color: BRAND.blue },
-  { id: 'voyage',   icon: '🚌', label: 'Voyages',   sub: 'Abidjan → partout',         tab: null,       screen: 'VoyageSearch', color: '#6366F1' },
-  { id: 'discover', icon: '🍽️', label: 'Explorer',  sub: 'Maquis & Restaurants',      tab: 'Explorer', screen: 'Discover',     color: BRAND.orange },
-  { id: 'reels',    icon: '📡', label: 'PULSE',     sub: 'Offres & promotions',        tab: 'PULSE',    screen: 'PromoFeedMain',color: '#E84040' },
-];
 
 const TIERS = {
   Bronze:   { emoji: '🥉', min: 0,      max: 10000,   cashback: 1,  color: '#CD7F32' },
   Silver:   { emoji: '🥈', min: 10000,  max: 50000,   cashback: 2,  color: '#9BA0A8' },
-  Gold:     { emoji: '🥇', min: 50000,  max: 200000,  cashback: 5,  color: BRAND.gold },
-  Diamond:  { emoji: '💎', min: 200000, max: 1000000, cashback: 10, color: '#7AA6D4' },
+  Gold:     { emoji: '🥇', min: 50000,  max: 200000,  cashback: 5,  color: '#F59E0B' },
+  Diamond:  { emoji: '💎', min: 200000, max: 1000000, cashback: 10, color: '#00D4AA' },
   Platinum: { emoji: '👑', min: 1000000,max: Infinity, cashback: 15, color: '#E5E4E2' },
 };
 
@@ -59,31 +53,18 @@ function getTier(spent) {
   return { name: 'Bronze', ...TIERS.Bronze };
 }
 
-// ── Skeleton loader ───────────────────────────────────────────────────────────
-function SkeletonBox({ w, h, r = 8, style }) {
-  const pulse = useRef(new Animated.Value(0.4)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1,   duration: 800, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0.4, duration: 800, useNativeDriver: true }),
-      ])
-    ).start();
-  }, []);
-  return (
-    <Animated.View style={[{ width: w, height: h, borderRadius: r, backgroundColor: BRAND.border, opacity: pulse }, style]} />
-  );
-}
-
 export default function ClientHomeScreen({ navigation }) {
   const { user } = useAuth();
-  const { lang, setLang, t } = useTranslation();
-  const [wallet,      setWallet]      = useState(null);
-  const [cashback,    setCashback]    = useState(0);
-  const [totalSpent,  setTotalSpent]  = useState(0);
-  const [hidden,      setHidden]      = useState(false);
-  const [refreshing,  setRefreshing]  = useState(false);
-  const [loading,     setLoading]     = useState(true);
+  const { lang, setLang } = useTranslation();
+  const [wallet,     setWallet]     = useState(null);
+  const [totalSpent, setTotalSpent] = useState(0);
+  const [hidden,     setHidden]     = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loading,    setLoading]    = useState(true);
+
+  const [upcomingEvents,   setUpcomingEvents]   = useState([]);
+  const [pendingServices,  setPendingServices]  = useState(0);
+  const [loyaltyPts,       setLoyaltyPts]       = useState(0);
 
   const [showScanModal, setShowScanModal] = useState(false);
   const [qrScanned,     setQrScanned]     = useState(false);
@@ -91,43 +72,47 @@ export default function ClientHomeScreen({ navigation }) {
   const [qrToken,       setQrToken]       = useState('');
   const [showQRModal,   setShowQRModal]   = useState(false);
   const [qrTimer,       setQrTimer]       = useState(10);
-  const qrIntervalRef = useRef(null);
-  const qrCountRef    = useRef(null);
+  const qrCountRef = useRef(null);
 
-  const scrollY   = useRef(new Animated.Value(0)).current;
   const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(24)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
   const scanScale = useRef(new Animated.Value(1)).current;
 
-  // Pulse du bouton scan
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(scanScale, { toValue: 1.08, duration: 900, useNativeDriver: true }),
-        Animated.timing(scanScale, { toValue: 1.0,  duration: 900, useNativeDriver: true }),
+        Animated.timing(scanScale, { toValue: 1.1, duration: 900, useNativeDriver: true }),
+        Animated.timing(scanScale, { toValue: 1.0, duration: 900, useNativeDriver: true }),
       ])
     ).start();
   }, []);
 
-  useFocusEffect(useCallback(() => {
-    loadData();
-  }, []));
+  useFocusEffect(useCallback(() => { loadData(); }, []));
 
   const loadData = async () => {
     try {
       const res = await walletService.getMyWallet().catch(() => null);
       if (res?.data) {
         setWallet(res.data);
-        const bal = res.data.balance ?? 0;
-        const spent = res.data.total_spent ?? 0;
-        setTotalSpent(spent);
-        const tier = getTier(spent);
-        setCashback(Math.floor(spent * tier.cashback / 100));
+        setTotalSpent(res.data.total_spent ?? 0);
+      }
+    } catch {}
+    // Charger dashboard unifié
+    try {
+      const ct = Platform.OS === 'web'
+        ? localStorage.getItem('sokora_client_token')
+        : await SecureStore.getItemAsync('sokora_client_token').catch(() => null);
+      if (ct) {
+        const dash = await clientDashboardService.get(ct).catch(() => null);
+        if (dash) {
+          setUpcomingEvents(dash.upcoming_events || []);
+          setPendingServices(dash.pending_services || 0);
+          setLoyaltyPts(dash.loyalty?.total_points || 0);
+        }
       }
     } catch {}
     setLoading(false);
     setRefreshing(false);
-
     Animated.parallel([
       Animated.timing(fadeAnim,  { toValue: 1, duration: 500, useNativeDriver: true }),
       Animated.timing(slideAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
@@ -136,11 +121,7 @@ export default function ClientHomeScreen({ navigation }) {
 
   const balance = wallet?.balance ?? 0;
   const tier    = getTier(totalSpent);
-  const nextTierKey = Object.keys(TIERS).find(k => TIERS[k].min > totalSpent);
-  const nextTier    = nextTierKey ? TIERS[nextTierKey] : null;
-  const tierProgress = nextTier
-    ? Math.min((totalSpent - tier.min) / (tier.max - tier.min) * 100, 100)
-    : 100;
+  const fmt     = n => Number(n).toLocaleString('fr-FR');
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -149,21 +130,15 @@ export default function ClientHomeScreen({ navigation }) {
     return 'Bonsoir';
   };
 
-  const fmt = n => n.toLocaleString('fr-FR');
-
-  const headerH = scrollY.interpolate({ inputRange: [0, 100], outputRange: [220, 100], extrapolate: 'clamp' });
-  const headerOp = scrollY.interpolate({ inputRange: [0, 80], outputRange: [1, 0], extrapolate: 'clamp' });
-
-  const getClientToken = async () => {
-    try {
-      if (Platform.OS === 'web') return localStorage.getItem('sokora_client_token');
-      return await SecureStore.getItemAsync('sokora_client_token');
-    } catch { return null; }
+  const dateStr = () => {
+    return new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   };
 
   const refreshQRToken = async () => {
     try {
-      const ct = await getClientToken();
+      const ct = Platform.OS === 'web'
+        ? localStorage.getItem('sokora_client_token')
+        : await SecureStore.getItemAsync('sokora_client_token').catch(() => null);
       if (!ct) return;
       const res = await fetch(`${API_URL}/wallet/qr-token?service=restaurant`, {
         headers: { 'X-Client-Token': ct },
@@ -178,13 +153,9 @@ export default function ClientHomeScreen({ navigation }) {
   const openQRModal = () => {
     setShowQRModal(true);
     refreshQRToken();
-    // Countdown timer
     qrCountRef.current = setInterval(() => {
       setQrTimer(t => {
-        if (t <= 1) {
-          refreshQRToken();
-          return 10;
-        }
+        if (t <= 1) { refreshQRToken(); return 10; }
         return t - 1;
       });
     }, 1000);
@@ -209,282 +180,264 @@ export default function ClientHomeScreen({ navigation }) {
     setQrScanned(true);
     setShowScanModal(false);
     if (data.startsWith('sokora://pay/')) {
-      const token = data.replace('sokora://pay/', '');
-      navigation.navigate('PaymentRequest', { token });
+      navigation.navigate('PaymentRequest', { token: data.replace('sokora://pay/', '') });
     } else {
-      // Wallet QR or unknown — show wallet pay
       navigation.navigate('WalletPay');
     }
   };
 
+  const firstName = user?.full_name?.split(' ')[0] ?? 'toi';
+
   return (
     <View style={s.root}>
-      <StatusBar barStyle="light-content" backgroundColor={BRAND.navy} />
+      <StatusBar barStyle="dark-content" backgroundColor={C.white} />
 
-      {/* ── Header ── */}
-      <Animated.View style={[s.header, { height: headerH }]}>
-        {/* Logo + notif */}
-        <View style={s.headerTop}>
-          <View style={s.logoRow}>
-            <View style={s.logoIcon}>
-              <Ionicons name="wifi" size={18} color="#fff" />
-            </View>
-            <Text style={s.logoText}>SOKORA</Text>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <TouchableOpacity
-              style={[s.notifBtn, { backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 10, padding: 7 }]}
-              onPress={openQRModal}
-            >
-              <Ionicons name="qr-code-outline" size={20} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity style={s.notifBtn} onPress={() => {}}>
-              <Ionicons name="notifications-outline" size={22} color="rgba(255,255,255,0.9)" />
-            </TouchableOpacity>
+      {/* ══════════ HEADER BLANC ══════════ */}
+      <View style={s.header}>
+        <View>
+          <Text style={s.headerGreeting}>{greeting()} {firstName} 👋</Text>
+          <Text style={s.headerDate}>{dateStr()}</Text>
+        </View>
+        <View style={s.headerRight}>
+          <TouchableOpacity style={s.headerBtn} onPress={openQRModal}>
+            <Ionicons name="qr-code-outline" size={22} color={C.textD} />
+          </TouchableOpacity>
+          <TouchableOpacity style={s.headerBtn} onPress={() => {}}>
+            <Ionicons name="notifications-outline" size={22} color={C.textD} />
+            <View style={s.notifDot} />
+          </TouchableOpacity>
+          <View style={s.avatar}>
+            <Text style={{ fontSize: 18 }}>{tier.emoji}</Text>
           </View>
         </View>
-
-        {/* Greeting + wallet badge */}
-        <Animated.View style={[s.headerBody, { opacity: headerOp }]}>
-          <View>
-            <Text style={s.greeting}>{greeting()}, {user?.full_name?.split(' ')[0] ?? 'toi'} 👋</Text>
-            <Text style={s.tagline}>Vis l'instant. Paye malin. Explore Abidjan. 🌍</Text>
-          </View>
-          <TouchableOpacity style={[s.tierBadge, { backgroundColor: tier.color + '30', borderColor: tier.color }]}
-            onPress={() => navigation.navigate('Profil')}>
-            <Text style={{ fontSize: 18 }}>{tier.emoji}</Text>
-            <Text style={[s.tierBadgeLabel, { color: tier.color }]}>{tier.name}</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      </Animated.View>
+      </View>
 
       <Animated.ScrollView
         style={{ flex: 1 }}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
-        scrollEventThrottle={16}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData(); }} tintColor={BRAND.orange} />}
-        contentContainerStyle={{ paddingBottom: 110 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData(); }} tintColor={C.orange} />}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        showsVerticalScrollIndicator={false}
       >
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
 
-          {/* ── Carte Wallet ── */}
+          {/* ══════════ CARTE WALLET ══════════ */}
           <View style={s.walletCard}>
+            {/* Orbes déco */}
+            <View style={s.orb1} />
+            <View style={s.orb2} />
+
+            {/* Haut : SOKORA PAY + tier */}
             <View style={s.walletTop}>
-              <Text style={s.walletLabel}>Solde disponible</Text>
-              <TouchableOpacity onPress={() => setHidden(h => !h)} style={s.eyeBtn}>
-                <Ionicons name={hidden ? 'eye-off-outline' : 'eye-outline'} size={20} color="rgba(255,255,255,0.7)" />
-              </TouchableOpacity>
+              <Text style={s.walletBrand}>SOKORA PAY</Text>
+              <View style={[s.tierChip, { borderColor: tier.color + '66', backgroundColor: tier.color + '22' }]}>
+                <Text style={{ fontSize: 11 }}>{tier.emoji}</Text>
+                <Text style={[s.tierChipTxt, { color: tier.color }]}>{tier.name.toUpperCase()}</Text>
+              </View>
             </View>
-            {loading ? (
-              <SkeletonBox w={180} h={40} r={8} style={{ marginVertical: 6 }} />
-            ) : (
-              <Text style={s.walletBalance}>
-                {hidden ? '••••••' : fmt(balance)} <Text style={s.walletCur}>FCFA</Text>
-              </Text>
+
+            {/* Balance */}
+            <View style={s.walletBalanceArea}>
+              <Text style={s.walletLabel}>SOLDE DISPONIBLE</Text>
+              <View style={s.walletRow}>
+                {loading
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={s.walletAmount}>{hidden ? '•••••' : fmt(balance)}</Text>
+                }
+                <Text style={s.walletCur}>FCFA</Text>
+                <TouchableOpacity onPress={() => setHidden(h => !h)} style={{ marginLeft: 8 }}>
+                  <Ionicons name={hidden ? 'eye-off-outline' : 'eye-outline'} size={18} color="rgba(255,255,255,0.55)" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Bande accent */}
+            <View style={s.walletAccent} />
+
+            {/* Barre fidélité */}
+            {loyaltyPts > 0 && (
+              <View style={s.loyaltyBar}>
+                <Ionicons name="star" size={12} color={C.gold} />
+                <Text style={s.loyaltyTxt}>{loyaltyPts.toLocaleString('fr-FR')} pts SOKORA</Text>
+                <TouchableOpacity onPress={() => navigation.navigate('Loyalty')}>
+                  <Text style={s.loyaltyLink}>Voir →</Text>
+                </TouchableOpacity>
+              </View>
             )}
-            <View style={s.walletActions}>
-              <TouchableOpacity style={s.walletBtn} onPress={() => navigation.navigate('WalletPay')}>
-                <Ionicons name="add-circle-outline" size={16} color={BRAND.orange} />
-                <Text style={s.walletBtnTxt}>Recharger</Text>
-              </TouchableOpacity>
-              <View style={s.walletDivider} />
-              <TouchableOpacity style={s.walletBtn} onPress={() => navigation.navigate('Wallet')}>
-                <Ionicons name="time-outline" size={16} color={BRAND.blueL} />
-                <Text style={[s.walletBtnTxt, { color: BRAND.blueL }]}>Historique</Text>
-              </TouchableOpacity>
-              <View style={s.walletDivider} />
-              <TouchableOpacity style={s.walletBtn} onPress={() => navigation.navigate('Profil', { screen: 'PremiumMain' })}>
-                <Text style={{ fontSize: 14 }}>{tier.emoji}</Text>
-                <Text style={[s.walletBtnTxt, { color: tier.color }]}>Mon tier</Text>
-              </TouchableOpacity>
-            </View>
           </View>
 
-          {/* ── Cashback Gauge ── */}
-          <View style={s.cashbackCard}>
-            <View style={s.cashbackHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={{ fontSize: 20 }}>🎁</Text>
-                <View>
-                  <Text style={s.cashbackTitle}>Cashback accumulé</Text>
-                  <Text style={s.cashbackSub}>Utilisable sur tous les services</Text>
+          {/* ══════════ ACTION PILLS ══════════ */}
+          <View style={s.pillsCard}>
+            {[
+              { icon: '↑',  label: 'Envoyer',  bg: ['#FF6B35','#ff8c5a'], nav: () => navigation.navigate('WalletPay') },
+              { icon: '↓',  label: 'Recevoir', bg: ['#00D4AA','#00b894'], nav: openQRModal },
+              { icon: '⊡',  label: 'Payer',    bg: ['#6C63FF','#9b93ff'], nav: () => navigation.navigate('WalletPay') },
+              { icon: '+',  label: 'Recharger',bg: ['#FFB800','#ffd60a'], nav: () => navigation.navigate('WalletPay') },
+            ].map((a, i) => (
+              <TouchableOpacity key={i} style={s.pill} onPress={a.nav} activeOpacity={0.8}>
+                <View style={[s.pillIcon, { backgroundColor: a.bg[0] }]}>
+                  <Text style={{ fontSize: 22, color: '#fff', fontWeight: '900' }}>{a.icon}</Text>
                 </View>
+                <Text style={s.pillLabel}>{a.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* ══════════ ÉVÉNEMENTS À VENIR ══════════ */}
+          {upcomingEvents.length > 0 && (
+            <View style={s.upcomingSection}>
+              <View style={s.sectionHeader}>
+                <Text style={s.sectionTitle}>📅 Prochainement</Text>
+                {pendingServices > 0 && (
+                  <TouchableOpacity
+                    style={s.alertBadge}
+                    onPress={() => navigation.navigate('MyServices')}
+                  >
+                    <Text style={s.alertBadgeTxt}>{pendingServices} RDV en attente</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-              <Text style={s.cashbackAmount}>{fmt(cashback)} F</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 2 }}>
+                {upcomingEvents.map((ev, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={[s.eventCard, { borderLeftColor: ev.color }]}
+                    onPress={() => {
+                      if (ev.type === 'voyage') navigation.navigate('MyTrips');
+                      else if (ev.type === 'hotel') navigation.navigate('MyBookings');
+                      else if (ev.type === 'service') navigation.navigate('MyServices');
+                    }}
+                  >
+                    <Text style={{ fontSize: 24 }}>{ev.icon}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.eventTitle} numberOfLines={1}>{ev.title}</Text>
+                      <Text style={s.eventSub}>{ev.subtitle}</Text>
+                    </View>
+                    {ev.qr_available && (
+                      <View style={s.qrAvailDot}>
+                        <Ionicons name="qr-code" size={14} color="#6366F1" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             </View>
-            <View style={s.gaugeTrack}>
-              <Animated.View style={[s.gaugeFill, { width: `${tierProgress}%`, backgroundColor: tier.color }]} />
-            </View>
-            <View style={s.gaugeLabels}>
-              <Text style={s.gaugeLabel}>{tier.emoji} {tier.name}</Text>
-              {nextTier && (
-                <Text style={s.gaugeLabel}>
-                  {fmt(tier.max - totalSpent)} F → {nextTierKey} {nextTier.emoji}
-                </Text>
-              )}
-            </View>
-          </View>
+          )}
 
-          {/* ── Services ── */}
+          {/* ══════════ ACCÈS RAPIDE ══════════ */}
           <View style={s.section}>
-            <Text style={s.sectionTitle}>Nos services</Text>
-            <View style={s.servicesGrid}>
-              {SERVICES.map(svc => (
-                <TouchableOpacity
-                  key={svc.id}
-                  style={s.serviceCard}
-                  onPress={() => {
-                    if (!svc.screen) return;
-                    if (svc.tab) navigation.navigate(svc.tab, { screen: svc.screen });
-                    else navigation.navigate(svc.screen);
-                  }}
-                  activeOpacity={0.85}
-                >
-                  <View style={[s.serviceIconBg, { backgroundColor: svc.color + '18' }]}>
-                    <Text style={s.serviceIcon}>{svc.icon}</Text>
-                  </View>
-                  <Text style={s.serviceLabel}>{svc.label}</Text>
-                  <Text style={s.serviceSub} numberOfLines={1}>{svc.sub}</Text>
-                </TouchableOpacity>
-              ))}
+            <View style={s.sectionHd}>
+              <Text style={s.sectionTitle}>Accès rapide</Text>
+              <TouchableOpacity><Text style={s.sectionMore}>Voir tout →</Text></TouchableOpacity>
             </View>
-          </View>
-
-          {/* ── Actions rapides ── */}
-          <View style={s.section}>
-            <Text style={s.sectionTitle}>Actions rapides</Text>
-            <View style={s.quickRow}>
+            <View style={s.accessGrid}>
               {[
-                { icon: 'qr-code',       label: 'Mon QR',       color: BRAND.orange,  nav: () => navigation.navigate('WalletPay') },
-                { icon: 'compass',       label: 'Explorer',     color: BRAND.blue,    nav: () => navigation.navigate('Explorer', { screen: 'Discover' }) },
-                { icon: 'bed-outline',   label: 'Mes hôtels',   color: '#19A99D',     nav: () => navigation.navigate('MyBookings') },
-                { icon: 'bus-outline',   label: 'Mes voyages',  color: '#6366F1',     nav: () => navigation.navigate('MyTrips') },
-              ].map((a, i) => (
-                <TouchableOpacity key={i} style={s.quickItem} onPress={a.nav}>
-                  <View style={[s.quickIcon, { backgroundColor: a.color + '18' }]}>
-                    <Ionicons name={a.icon} size={22} color={a.color} />
+                { emoji: '🏨', label: 'Hôtels',    bg: '#667eea', nav: () => navigation.navigate('HotelSearch') },
+                { emoji: '🚌', label: 'Transport',  bg: '#f093fb', nav: () => navigation.navigate('VoyageSearch') },
+                { emoji: '🍽️', label: 'Maquis',    bg: '#4facfe', nav: () => navigation.navigate('Explorer', { screen: 'Discover' }) },
+                { emoji: '🔧', label: 'Services',    bg: '#43e97b', nav: () => navigation.navigate('ServiceSearch') },
+                { emoji: '📋', label: 'Mes services',bg: '#00D4AA', nav: () => navigation.navigate('MyServices') },
+              ].map((item, i) => (
+                <TouchableOpacity key={i} style={s.accessItem} onPress={item.nav} activeOpacity={0.8}>
+                  <View style={[s.accessIcon, { backgroundColor: item.bg }]}>
+                    <Text style={{ fontSize: 24 }}>{item.emoji}</Text>
                   </View>
-                  <Text style={s.quickLabel}>{a.label}</Text>
+                  <Text style={s.accessLabel}>{item.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-
-            {/* Bouton SOKORA Black */}
-            <TouchableOpacity
-              style={s.blackBtn}
-              onPress={() => navigation.navigate('Loyalty')}
-              activeOpacity={0.88}
-            >
-              <Text style={s.blackBtnIcon}>🖤</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={s.blackBtnTitle}>SOKORA Black</Text>
-                <Text style={s.blackBtnSub}>Programme de fidélité · {tier.name} {tier.emoji}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#B9F2FF" />
-            </TouchableOpacity>
           </View>
 
-          {/* ── Carte promo cashback ── */}
-          <View style={s.promoCard}>
+          {/* ══════════ OFFRES DU JOUR ══════════ */}
+          <View style={s.section}>
+            <View style={s.sectionHd}>
+              <Text style={s.sectionTitle}>🔥 Offres du jour</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('PULSE', { screen: 'PromoFeedMain' })}>
+                <Text style={s.sectionMore}>Tout voir →</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 4 }}>
+              {[
+                { emoji: '🏨', label: 'Hôtel Diplomate', sub: 'Nuit dès 35 000 F', disc: '-30%', bg: '#667eea' },
+                { emoji: '🍖', label: 'Maquis Belle Vie', sub: 'Menu complet 5 000 F', disc: '-20%', bg: '#f093fb' },
+                { emoji: '🚌', label: 'UTB Abidjan→Bouaké', sub: 'Aller simple 6 500 F', disc: '-15%', bg: '#4facfe' },
+              ].map((o, i) => (
+                <TouchableOpacity key={i} style={s.offerCard} activeOpacity={0.85}
+                  onPress={() => navigation.navigate('PULSE', { screen: 'PromoFeedMain' })}>
+                  <View style={[s.offerThumb, { backgroundColor: o.bg }]}>
+                    <Text style={{ fontSize: 36 }}>{o.emoji}</Text>
+                    <View style={s.offerDisc}><Text style={s.offerDiscTxt}>{o.disc}</Text></View>
+                  </View>
+                  <View style={s.offerBody}>
+                    <Text style={s.offerName}>{o.label}</Text>
+                    <Text style={s.offerSub}>{o.sub}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* ══════════ SOKORA BLACK ══════════ */}
+          <TouchableOpacity style={s.blackBar} onPress={() => navigation.navigate('Loyalty')} activeOpacity={0.88}>
+            <Text style={{ fontSize: 22 }}>🖤</Text>
             <View style={{ flex: 1 }}>
-              <Text style={s.promoTitle}>💸 Gagne plus de cashback</Text>
-              <Text style={s.promoSub}>
-                Niveau {tier.name} = {tier.cashback}% sur chaque paiement SOKORA
-              </Text>
+              <Text style={s.blackTitle}>SOKORA Black</Text>
+              <Text style={s.blackSub}>Programme de fidélité · {tier.name} {tier.emoji}</Text>
             </View>
-            <TouchableOpacity style={s.promoBtn} onPress={() => navigation.navigate('Profil', { screen: 'PremiumMain' })}>
-              <Text style={s.promoBtnTxt}>Voir →</Text>
-            </TouchableOpacity>
-          </View>
+            <Ionicons name="chevron-forward" size={18} color="#B9F2FF" />
+          </TouchableOpacity>
 
-          {/* ── Langue / Language ── */}
-          <View style={{ marginHorizontal: 16, marginBottom: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 13, color: BRAND.muted, fontWeight: '600' }}>
-              🌐 {t('profile.language')}
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {[{ id: 'fr', label: '🇫🇷 FR' }, { id: 'en', label: '🇬🇧 EN' }].map(l => (
-                <TouchableOpacity
-                  key={l.id}
-                  onPress={() => setLang(l.id)}
-                  style={{
-                    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 99,
-                    backgroundColor: lang === l.id ? BRAND.orange : BRAND.bg,
-                    borderWidth: 1.5, borderColor: lang === l.id ? BRAND.orange : BRAND.border,
-                  }}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: lang === l.id ? '#fff' : BRAND.muted }}>
-                    {l.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+          {/* ══════════ HISTORIQUE ══════════ */}
+          <TouchableOpacity style={s.historyBtn} onPress={() => navigation.navigate('Activity')} activeOpacity={0.82}>
+            <Ionicons name="time-outline" size={18} color={C.orange} />
+            <Text style={s.historyBtnTxt}>Voir tout l'historique SOKORA</Text>
+            <Ionicons name="chevron-forward" size={16} color={C.textG} />
+          </TouchableOpacity>
 
         </Animated.View>
       </Animated.ScrollView>
 
-      {/* ── Bouton Scan flottant (FAB) ── */}
+      {/* ══════════ FAB SCAN ══════════ */}
       <Animated.View style={[s.fab, { transform: [{ scale: scanScale }] }]}>
-        <TouchableOpacity
-          style={s.fabBtn}
-          onPress={openScanner}
-          activeOpacity={0.9}
-        >
-          <Ionicons name="scan-circle-outline" size={28} color="#fff" />
+        <TouchableOpacity style={s.fabBtn} onPress={openScanner} activeOpacity={0.9}>
+          <Ionicons name="scan-circle-outline" size={26} color="#fff" />
           <Text style={s.fabLabel}>SCAN</Text>
         </TouchableOpacity>
       </Animated.View>
 
-      {/* ── Modal QR Wallet dynamique (MaxIT style) ── */}
+      {/* ══════════ MODAL QR WALLET ══════════ */}
       <Modal visible={showQRModal} transparent animationType="fade" onRequestClose={closeQRModal}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(26,46,74,0.92)', alignItems: 'center', justifyContent: 'center' }}>
-          <View style={{ backgroundColor: '#fff', borderRadius: 28, padding: 28, alignItems: 'center', width: 300 }}>
-            {/* Header */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 20 }}>
+        <View style={s.modalBg}>
+          <View style={s.modalCard}>
+            <View style={s.modalHeader}>
               <View>
-                <Text style={{ fontSize: 18, fontWeight: '800', color: BRAND.navy }}>Mon QR SOKORA</Text>
-                <Text style={{ fontSize: 12, color: BRAND.muted, marginTop: 2 }}>Présentez à la caisse pour payer</Text>
+                <Text style={s.modalTitle}>Mon QR SOKORA</Text>
+                <Text style={s.modalSub}>Présentez à la caisse pour payer</Text>
               </View>
-              <TouchableOpacity onPress={closeQRModal} style={{ padding: 4 }}>
-                <Ionicons name="close" size={22} color={BRAND.muted} />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={closeQRModal}><Ionicons name="close" size={22} color={C.textG} /></TouchableOpacity>
             </View>
-
-            {/* QR Code */}
-            <View style={{ padding: 14, backgroundColor: BRAND.bg, borderRadius: 20, borderWidth: 2, borderColor: BRAND.orange + '30' }}>
+            <View style={s.qrBox}>
               {qrToken
-                ? <QRCode value={qrToken} size={180} color={BRAND.navy} backgroundColor="#F2F5FB" />
-                : <View style={{ width: 180, height: 180, alignItems: 'center', justifyContent: 'center' }}>
-                    <ActivityIndicator size="large" color={BRAND.orange} />
-                  </View>
+                ? <QRCode value={qrToken} size={180} color={C.navy} backgroundColor={C.bg} />
+                : <View style={s.qrLoading}><ActivityIndicator size="large" color={C.orange} /></View>
               }
             </View>
-
-            {/* Timer */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16 }}>
-              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: qrTimer <= 3 ? '#FFF0F0' : BRAND.bg, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: qrTimer <= 3 ? '#E84040' : BRAND.orange }}>
-                <Text style={{ fontSize: 14, fontWeight: '800', color: qrTimer <= 3 ? '#E84040' : BRAND.orange }}>{qrTimer}</Text>
+            <View style={s.timerRow}>
+              <View style={[s.timerCircle, { borderColor: qrTimer <= 3 ? '#E84040' : C.orange, backgroundColor: qrTimer <= 3 ? '#FFF0F0' : C.bg }]}>
+                <Text style={[s.timerNum, { color: qrTimer <= 3 ? '#E84040' : C.orange }]}>{qrTimer}</Text>
               </View>
-              <Text style={{ fontSize: 12, color: BRAND.muted }}>
-                {qrTimer <= 3 ? 'Renouvellement...' : 'Nouveau code dans ' + qrTimer + 's'}
-              </Text>
+              <Text style={s.timerTxt}>{qrTimer <= 3 ? 'Renouvellement...' : `Nouveau code dans ${qrTimer}s`}</Text>
             </View>
-
-            {/* Wallet balance */}
             {wallet && (
-              <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: BRAND.border, width: '100%', alignItems: 'center' }}>
-                <Text style={{ fontSize: 11, color: BRAND.muted, fontWeight: '600' }}>SOLDE WALLET</Text>
-                <Text style={{ fontSize: 24, fontWeight: '800', color: BRAND.navy, marginTop: 4 }}>
-                  {hidden ? '••• ••• F' : `${wallet.balance?.toLocaleString('fr-FR') ?? 0} F`}
-                </Text>
+              <View style={s.modalBalance}>
+                <Text style={s.modalBalLabel}>SOLDE WALLET</Text>
+                <Text style={s.modalBalAmt}>{hidden ? '••• ••• F' : `${fmt(balance)} F`}</Text>
               </View>
             )}
           </View>
         </View>
       </Modal>
 
-      {/* ── Modal Scanner QR ── */}
+      {/* ══════════ MODAL SCANNER ══════════ */}
       <Modal visible={showScanModal} animationType="slide" onRequestClose={() => setShowScanModal(false)}>
         <View style={{ flex: 1, backgroundColor: '#000' }}>
           <CameraView
@@ -492,150 +445,210 @@ export default function ClientHomeScreen({ navigation }) {
             onBarcodeScanned={qrScanned ? undefined : handleQRScan}
             barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
           />
-          {/* Cadre de scan */}
-          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
-            <View style={{ width: 260, height: 260, borderRadius: 20, borderWidth: 3, borderColor: BRAND.orange, backgroundColor: 'transparent' }} />
+          <View style={s.scanOverlay}>
+            <View style={s.scanFrame} />
           </View>
-          {/* Instructions */}
-          <View style={{ position: 'absolute', top: 60, left: 0, right: 0, alignItems: 'center' }}>
-            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800', textShadowColor: '#000', textShadowRadius: 4 }}>
-              Scanner un QR SOKORA
-            </Text>
-            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 6 }}>
-              QR de paiement ou QR Wallet
-            </Text>
+          <View style={s.scanTop}>
+            <Text style={s.scanTitle}>Scanner un QR SOKORA</Text>
+            <Text style={s.scanSub}>QR de paiement ou QR Wallet</Text>
           </View>
-          {/* Fermer */}
-          <TouchableOpacity
-            style={{ position: 'absolute', bottom: 60, alignSelf: 'center', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 50, padding: 12 }}
-            onPress={() => setShowScanModal(false)}
-          >
+          <TouchableOpacity style={s.scanClose} onPress={() => setShowScanModal(false)}>
             <Ionicons name="close-circle" size={52} color="#fff" />
           </TouchableOpacity>
         </View>
       </Modal>
-
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BRAND.bg },
+  root: { flex: 1, backgroundColor: C.bg },
 
-  // Header
+  // ── Header blanc ──
   header: {
-    backgroundColor: BRAND.navy,
-    paddingTop: Platform.OS === 'ios' ? 54 : 36,
+    backgroundColor: C.white,
+    paddingTop: Platform.OS === 'ios' ? 54 : 40,
     paddingHorizontal: 20,
     paddingBottom: 16,
+    flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.04)',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 8, elevation: 3,
   },
-  headerTop:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  logoRow:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  logoIcon:     { width: 32, height: 32, borderRadius: 8, backgroundColor: BRAND.orange, justifyContent: 'center', alignItems: 'center' },
-  logoText:     { fontSize: 18, fontWeight: '900', color: '#fff', letterSpacing: 1 },
-  notifBtn:     { padding: 4 },
-  headerBody:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  greeting:     { fontSize: 20, fontWeight: '800', color: '#fff' },
-  tagline:      { fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 3 },
-  tierBadge:    { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1 },
-  tierBadgeLabel:{ fontSize: 12, fontWeight: '700' },
+  headerGreeting: { fontSize: 20, fontWeight: '800', color: C.textD },
+  headerDate:     { fontSize: 11, color: C.textG, marginTop: 2 },
+  headerRight:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerBtn: {
+    width: 40, height: 40, borderRadius: 14,
+    backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center',
+    position: 'relative',
+  },
+  notifDot: {
+    width: 9, height: 9, borderRadius: 5, backgroundColor: C.orange,
+    position: 'absolute', top: 7, right: 7, borderWidth: 2, borderColor: C.white,
+  },
+  avatar: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: C.orange, alignItems: 'center', justifyContent: 'center',
+    shadowColor: C.orange, shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
 
-  // Wallet card
+  // ── Wallet card ──
   walletCard: {
-    margin: 16, marginTop: 16,
-    backgroundColor: BRAND.navy,
-    borderRadius: 20, padding: 20,
-    ...Shadow.lg,
+    margin: 16,
+    backgroundColor: C.navy,
+    borderRadius: 26, paddingTop: 22, paddingHorizontal: 22,
+    overflow: 'hidden',
+    minHeight: 175,
+    shadowColor: C.navy, shadowOpacity: 0.4, shadowRadius: 20, shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
   },
-  walletTop:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  walletLabel:  { fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8 },
-  eyeBtn:       { padding: 4 },
-  walletBalance:{ fontSize: 34, fontWeight: '900', color: '#fff', marginVertical: 6 },
-  walletCur:    { fontSize: 16, fontWeight: '400' },
-  walletActions:{ flexDirection: 'row', marginTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', paddingTop: 14 },
-  walletBtn:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
-  walletBtnTxt: { fontSize: 12, fontWeight: '700', color: BRAND.orange },
-  walletDivider:{ width: 1, backgroundColor: 'rgba(255,255,255,0.12)', marginHorizontal: 4 },
-
-  // Cashback gauge
-  cashbackCard: {
-    marginHorizontal: 16, marginBottom: 16,
-    backgroundColor: BRAND.surface,
-    borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: BRAND.border,
-    ...Shadow.sm,
+  orb1: {
+    position: 'absolute', width: 220, height: 220, borderRadius: 110,
+    top: -80, right: -60,
+    backgroundColor: 'rgba(0,212,170,0.15)',
   },
-  cashbackHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  cashbackTitle:  { fontSize: 14, fontWeight: '700', color: BRAND.text },
-  cashbackSub:    { fontSize: 11, color: BRAND.muted, marginTop: 1 },
-  cashbackAmount: { fontSize: 20, fontWeight: '900', color: BRAND.orange },
-  gaugeTrack:     { height: 8, backgroundColor: BRAND.border, borderRadius: 4, overflow: 'hidden' },
-  gaugeFill:      { height: '100%', borderRadius: 4 },
-  gaugeLabels:    { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
-  gaugeLabel:     { fontSize: 11, color: BRAND.muted, fontWeight: '600' },
-
-  // Section
-  section:      { paddingHorizontal: 16, marginBottom: 16 },
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: BRAND.text, marginBottom: 12 },
-
-  // Services grid
-  servicesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  serviceCard: {
-    width: (W - 32 - 10) / 2,
-    backgroundColor: BRAND.surface,
-    borderRadius: 16, padding: 14,
-    borderWidth: 1, borderColor: BRAND.border,
-    gap: 4,
-    ...Shadow.sm,
+  orb2: {
+    position: 'absolute', width: 160, height: 160, borderRadius: 80,
+    bottom: -40, left: -30,
+    backgroundColor: 'rgba(255,107,53,0.12)',
   },
-  serviceIconBg: { width: 48, height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
-  serviceIcon:   { fontSize: 26 },
-  serviceLabel:  { fontSize: 14, fontWeight: '700', color: BRAND.text },
-  serviceSub:    { fontSize: 11, color: BRAND.muted },
+  walletTop:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', zIndex: 1 },
+  walletBrand:{ fontSize: 13, fontWeight: '900', color: 'rgba(255,255,255,0.5)', letterSpacing: 2.5, textTransform: 'uppercase' },
+  tierChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  tierChipTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  walletBalanceArea: { marginTop: 14, zIndex: 1 },
+  walletLabel:{ fontSize: 10, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: '600' },
+  walletRow:  { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 4 },
+  walletAmount:{ fontSize: 34, fontWeight: '900', color: '#fff', letterSpacing: -0.5 },
+  walletCur:  { fontSize: 14, color: 'rgba(255,255,255,0.55)', fontWeight: '500', marginBottom: 4 },
+  walletAccent:{
+    height: 6,
+    marginTop: 18,
+    marginHorizontal: -22,
+    // Simule le dégradé orange → teal → navy avec une View colorée
+    backgroundColor: C.orange,
+    opacity: 0.75,
+  },
 
-  // Quick actions
-  quickRow:  { flexDirection: 'row', justifyContent: 'space-between' },
-  quickItem: { alignItems: 'center', gap: 6, flex: 1 },
-  quickIcon: { width: 52, height: 52, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
-  quickLabel:{ fontSize: 11, fontWeight: '600', color: BRAND.text, textAlign: 'center' },
+  // ── Action pills ──
+  pillsCard: {
+    marginHorizontal: 16, marginBottom: 4,
+    backgroundColor: C.white, borderRadius: 22,
+    flexDirection: 'row', justifyContent: 'space-around',
+    padding: 16,
+    shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  pill:      { alignItems: 'center', gap: 7 },
+  pillIcon:  { width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
+               shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
+  pillLabel: { fontSize: 10, fontWeight: '700', color: C.textG, textTransform: 'capitalize' },
 
-  // SOKORA Black button
-  blackBtn: {
-    marginTop: 14,
+  // ── Section ──
+  section:      { paddingHorizontal: 16, marginTop: 18 },
+  sectionHd:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: C.textD },
+  sectionMore:  { fontSize: 11, color: C.orange, fontWeight: '700' },
+
+  // ── Access grid ──
+  accessGrid:  { flexDirection: 'row', justifyContent: 'space-between' },
+  accessItem:  { alignItems: 'center', gap: 7, flex: 1 },
+  accessIcon:  { width: 56, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                 shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
+  accessLabel: { fontSize: 10, fontWeight: '700', color: C.textD, textAlign: 'center' },
+
+  // ── Offer cards ──
+  offerCard: {
+    width: 170, backgroundColor: C.white, borderRadius: 20, overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 12, shadowOffset: { width: 0, height: 3 }, elevation: 3,
+  },
+  offerThumb: { height: 96, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  offerDisc:  { position: 'absolute', top: 8, right: 8, backgroundColor: C.orange, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  offerDiscTxt:{ fontSize: 10, fontWeight: '800', color: '#fff' },
+  offerBody:  { padding: 10 },
+  offerName:  { fontSize: 11, fontWeight: '700', color: C.textD, marginBottom: 3 },
+  offerSub:   { fontSize: 10, color: C.textG },
+
+  // ── SOKORA Black ──
+  blackBar: {
+    margin: 16, marginTop: 18,
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#0f1e35',
-    borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: '#B9F2FF33',
-    ...Shadow.sm,
+    backgroundColor: '#0f1e35', borderRadius: 18, padding: 16,
+    borderWidth: 1, borderColor: 'rgba(185,242,255,0.2)',
+    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 5,
   },
-  blackBtnIcon:  { fontSize: 24 },
-  blackBtnTitle: { fontSize: 14, fontWeight: '800', color: '#B9F2FF', letterSpacing: 0.5 },
-  blackBtnSub:   { fontSize: 11, color: '#7a8fab', marginTop: 2 },
+  blackTitle: { fontSize: 14, fontWeight: '800', color: '#B9F2FF', letterSpacing: 0.5 },
+  blackSub:   { fontSize: 11, color: '#7a8fab', marginTop: 2 },
 
-  // Promo card
-  promoCard: {
-    marginHorizontal: 16, marginBottom: 8,
-    backgroundColor: BRAND.orange + '12',
-    borderRadius: 16, padding: 16,
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    borderWidth: 1, borderColor: BRAND.orange + '30',
-  },
-  promoTitle:  { fontSize: 14, fontWeight: '700', color: BRAND.text },
-  promoSub:    { fontSize: 12, color: BRAND.muted, marginTop: 3 },
-  promoBtn:    { backgroundColor: BRAND.orange, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
-  promoBtnTxt: { fontSize: 13, fontWeight: '800', color: '#fff' },
-
-  // FAB
-  fab: {
-    position: 'absolute', bottom: 24, alignSelf: 'center',
-  },
+  // ── FAB ──
+  fab: { position: 'absolute', bottom: 24, alignSelf: 'center' },
   fabBtn: {
-    backgroundColor: BRAND.orange,
-    borderRadius: 36, width: 72, height: 72,
-    justifyContent: 'center', alignItems: 'center',
-    shadowColor: BRAND.orange, shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 6 },
-    elevation: 12, gap: 2,
+    backgroundColor: C.orange, borderRadius: 36, width: 72, height: 72,
+    justifyContent: 'center', alignItems: 'center', gap: 2,
+    shadowColor: C.orange, shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 12,
   },
   fabLabel: { fontSize: 9, fontWeight: '900', color: '#fff', letterSpacing: 1 },
+
+  // ── Modal QR ──
+  modalBg:   { flex: 1, backgroundColor: 'rgba(15,30,53,0.92)', alignItems: 'center', justifyContent: 'center' },
+  modalCard: { backgroundColor: '#fff', borderRadius: 28, padding: 28, alignItems: 'center', width: 300 },
+  modalHeader:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: 20 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: C.navy },
+  modalSub:   { fontSize: 12, color: C.textG, marginTop: 2 },
+  qrBox:      { padding: 14, backgroundColor: C.bg, borderRadius: 20, borderWidth: 2, borderColor: C.orange + '30' },
+  qrLoading:  { width: 180, height: 180, alignItems: 'center', justifyContent: 'center' },
+  timerRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 },
+  timerCircle:{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  timerNum:   { fontSize: 14, fontWeight: '800' },
+  timerTxt:   { fontSize: 12, color: C.textG },
+  modalBalance:{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#DDE4F0', width: '100%', alignItems: 'center' },
+  modalBalLabel:{ fontSize: 11, color: C.textG, fontWeight: '600', letterSpacing: 0.5 },
+  modalBalAmt:{ fontSize: 24, fontWeight: '800', color: C.navy, marginTop: 4 },
+
+  // ── Historique ──
+  historyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: C.white,
+    marginHorizontal: 16, marginBottom: 16,
+    borderRadius: 14, padding: 14,
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 }, elevation: 2,
+  },
+  historyBtnTxt: { flex: 1, fontSize: 14, fontWeight: '700', color: C.textD },
+
+  // ── Scanner ──
+  scanOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  scanFrame:   { width: 260, height: 260, borderRadius: 20, borderWidth: 3, borderColor: C.orange },
+  scanTop:     { position: 'absolute', top: 60, left: 0, right: 0, alignItems: 'center' },
+  scanTitle:   { color: '#fff', fontSize: 18, fontWeight: '800', textShadowColor: '#000', textShadowRadius: 4 },
+  scanSub:     { color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 6 },
+  scanClose:   { position: 'absolute', bottom: 60, alignSelf: 'center', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 50, padding: 4 },
+
+  // ── Upcoming events ──
+  upcomingSection: { paddingHorizontal: 16, marginBottom: 16 },
+  sectionHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  alertBadge:      { backgroundColor: '#FEE9E9', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  alertBadgeTxt:   { fontSize: 11, fontWeight: '700', color: '#EF4444' },
+  eventCard: {
+    width: 200, backgroundColor: C.white, borderRadius: 14,
+    padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderLeftWidth: 4, shadowColor: '#000', shadowOpacity: 0.06,
+    shadowRadius: 6, elevation: 2,
+  },
+  eventTitle: { fontSize: 13, fontWeight: '700', color: C.textD },
+  eventSub:   { fontSize: 11, color: C.textG, marginTop: 2 },
+  qrAvailDot: { width: 28, height: 28, borderRadius: 8, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' },
+
+  // ── Loyalty bar (inside wallet card) ──
+  loyaltyBar: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.15)' },
+  loyaltyTxt: { flex: 1, fontSize: 12, color: 'rgba(255,255,255,0.7)', fontWeight: '600' },
+  loyaltyLink:{ fontSize: 12, color: C.gold, fontWeight: '800' },
 });

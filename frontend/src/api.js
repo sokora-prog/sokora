@@ -22,19 +22,24 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // Ne pas rediriger si c'est une tentative de login (évite boucle)
+    const isLoginCall = error.config?.url?.includes("/auth/login");
+    if (error.response?.status === 401 && !isLoginCall) {
       localStorage.removeItem("sokora_token");
       localStorage.removeItem("sokora_user");
-      window.location.href = "/login";
+      window.location.href = "/";
     }
     return Promise.reject(error);
   }
 );
 
 export const authApi = {
-  login: (phone_number, password) => api.post("/auth/login", { phone_number, password }),
-  me: () => api.get("/auth/me"),
-  register: (data) => api.post("/auth/register", data),
+  login:      (phone_number, password) => api.post("/auth/login", { phone_number, password }),
+  me:         () => api.get("/auth/me"),
+  register:   (data) => api.post("/auth/register", data),
+  requestOtp: (phone) => api.post("/auth/request-otp", { phone }),
+  verifyOtp:  (phone, code, password) =>
+    api.post("/auth/verify-otp-login", { phone, code, ...(password ? { password } : {}) }),
 };
 
 export const dashboardApi = {
