@@ -212,7 +212,9 @@ export default function MatchAnalysis({ matchId, onPlaced }) {
         <div className="card-head">
           <h2>Paris de valeur</h2>
           <span className="hint">
-            classés par edge · mise de Kelly fractionnée sur bankroll de {money(analysis.bankroll)}
+            classés par edge net · avis du marché lu sur{' '}
+            {value[0]?.market_source || '—'} · mise de Kelly fractionnée sur une
+            bankroll de {money(analysis.bankroll)}
           </span>
         </div>
         {value.length ? (
@@ -234,7 +236,13 @@ export default function MatchAnalysis({ matchId, onPlaced }) {
                     <td className="num">{nf(bet.odds)}</td>
                     <td className="num">{nf(bet.fair_odds)}</td>
                     <td className="num">{pct(bet.model_probability)}</td>
-                    <td className="num">{bet.market_probability ? pct(bet.market_probability) : '—'}</td>
+                    <td className="num" title={
+                      bet.bookmaker_margin != null
+                        ? `Marge du marché de référence : ${nf(bet.bookmaker_margin * 100, 2)} %`
+                        : undefined
+                    }>
+                      {bet.market_probability ? pct(bet.market_probability) : '—'}
+                    </td>
                     <td
                       className="num"
                       style={{
@@ -266,6 +274,15 @@ export default function MatchAnalysis({ matchId, onPlaced }) {
           <div className="empty">
             Aucune cote enregistrée pour ce match : l'analyse reste valable, mais la
             valeur ne peut pas être mesurée. Ajoutez les cotes dans l'onglet «&nbsp;Données&nbsp;».
+          </div>
+        )}
+        {value.length > 0 && (
+          <div className="card-note">
+            L'edge affiché est net de la décote de {pct(value[0].haircut || 0, 0)} appliquée
+            aux estimations (edge brut le plus élevé :{' '}
+            {signed(Math.max(...value.map(v => v.edge_raw_pct)), 2)} %). La probabilité
+            du marché est lue sur la ligne de {value[0].market_source}, tandis que la
+            mise se joue à la meilleure cote trouvée.
           </div>
         )}
         {flash && <div className="notice ok" style={{ marginTop: 12 }}>{flash}</div>}

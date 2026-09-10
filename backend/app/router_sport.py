@@ -15,7 +15,7 @@ ne fait que traduire base de données ↔ moteur d'analyse.
 import csv
 import io
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,6 +37,79 @@ router = APIRouter(prefix="/sport", tags=["sport"])
 DEFAULT_MIN_EDGE = 0.03
 
 DEMO_COMPETITION_NAME = "Championnat Démo"
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  COLONNES DE COTES DU FORMAT football-data.co.uk
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Ces fichiers contiennent, pour chaque match joué, les cotes d'ouverture ET de
+# clôture de plusieurs bookmakers. Les cotes de CLÔTURE sont ce qui donne toute
+# sa valeur à l'import : sans elles, la calibration n'a aucune barre à franchir.
+#
+# Conventions du fichier :
+#   PS…  Pinnacle (le book le plus « sharp », référence de la clôture)
+#   B365 Bet365 · WH William Hill · VC/BW/IW autres opérateurs
+#   Max… meilleure cote du marché · Avg… moyenne du marché
+#   …C…  variante de clôture (PSCH, AvgCH, B365C>2.5, AHCh…)
+#   Bb…  ancien préfixe Betbrain, utilisé jusqu'à la saison 2018/2019
+#
+# Chaque entrée : colonne → (marché, sélection, bookmaker, cote de clôture ?)
+
+FOOTBALL_DATA_ODDS: Dict[str, Tuple[str, str, str, bool]] = {}
+
+
+def _register_1x2(prefix: str, bookmaker: str, closing: bool) -> None:
+    for suffix, selection in (("H", "HOME"), ("D", "DRAW"), ("A", "AWAY")):
+        FOOTBALL_DATA_ODDS[f"{prefix}{suffix}"] = ("1X2", selection, bookmaker, closing)
+
+
+def _register_totals(prefix: str, bookmaker: str, closing: bool) -> None:
+    FOOTBALL_DATA_ODDS[f"{prefix}>2.5"] = ("OU_2.5", "OVER", bookmaker, closing)
+    FOOTBALL_DATA_ODDS[f"{prefix}<2.5"] = ("OU_2.5", "UNDER", bookmaker, closing)
+
+
+for _prefix, _book, _closing in (
+    # 1X2 — clôture
+    ("PSC", "Pinnacle", True), ("AvgC", "Moyenne", True), ("MaxC", "Meilleure", True),
+    ("B365C", "Bet365", True), ("WHC", "William Hill", True), ("VCC", "VC Bet", True),
+    ("BWC", "Bwin", True), ("IWC", "Interwetten", True),
+    # 1X2 — ouverture
+    ("PS", "Pinnacle", False), ("Avg", "Moyenne", False), ("Max", "Meilleure", False),
+    ("B365", "Bet365", False), ("WH", "William Hill", False), ("VC", "VC Bet", False),
+    ("BW", "Bwin", False), ("IW", "Interwetten", False),
+    # Anciennes saisons (préfixe Betbrain)
+    ("BbAv", "Moyenne", False), ("BbMx", "Meilleure", False),
+):
+    _register_1x2(_prefix, _book, _closing)
+
+for _prefix, _book, _closing in (
+    ("PC", "Pinnacle", True), ("AvgC", "Moyenne", True), ("MaxC", "Meilleure", True),
+    ("B365C", "Bet365", True),
+    ("P", "Pinnacle", False), ("Avg", "Moyenne", False), ("Max", "Meilleure", False),
+    ("B365", "Bet365", False),
+    ("BbAv", "Moyenne", False), ("BbMx", "Meilleure", False),
+):
+    _register_totals(_prefix, _book, _closing)
+
+#: Handicap asiatique : la ligne vit dans sa propre colonne, les cotes dans
+#: deux autres. (colonne_ligne, colonne_domicile, colonne_extérieur, book, clôture)
+FOOTBALL_DATA_HANDICAPS: Tuple[Tuple[str, str, str, str, bool], ...] = (
+    ("AHCh", "PCAHH", "PCAHA", "Pinnacle", True),
+    ("AHCh", "AvgCAHH", "AvgCAHA", "Moyenne", True),
+    ("AHCh", "MaxCAHH", "MaxCAHA", "Meilleure", True),
+    ("AHCh", "B365CAHH", "B365CAHA", "Bet365", True),
+    ("AHh", "PAHH", "PAHA", "Pinnacle", False),
+    ("AHh", "AvgAHH", "AvgAHA", "Moyenne", False),
+    ("AHh", "MaxAHH", "MaxAHA", "Meilleure", False),
+    ("AHh", "B365AHH", "B365AHA", "Bet365", False),
+    ("BbAHh", "BbAvAHH", "BbAvAHA", "Moyenne", False),
+    ("BbAHh", "BbMxAHH", "BbMxAHA", "Meilleure", False),
+)
+
+#: Bookmakers importés par défaut : la référence sharp, la moyenne du marché et
+#: la meilleure cote disponible. Importer les vingt colonnes n'apporterait rien
+#: qu'un volume de lignes.
+DEFAULT_ODDS_BOOKMAKERS = ("Pinnacle", "Moyenne", "Meilleure")
 
 #: Mise en garde affichée dès qu'une mesure porte sur le jeu de démonstration.
 #: Ce monde synthétique est engendré par le processus de Poisson que le modèle
@@ -196,6 +269,12 @@ class ImportIn(BaseModel):
     competition_name: Optional[str] = None
     season: Optional[str] = None
     csv_text: str
+    #: Importe aussi les colonnes de cotes quand le fichier en contient.
+    import_odds: bool = True
+    #: Bookmakers retenus ("Pinnacle", "Moyenne", "Meilleure", "Bet365"…).
+    odds_bookmakers: Optional[List[str]] = None
+    #: Ignorer les cotes d'ouverture et ne garder que celles de clôture.
+    closing_odds_only: bool = False
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -702,6 +781,75 @@ def set_result(match_id: int, payload: ResultIn, db: Session = Depends(get_db)):
     return {"match": _match_out(match), "settled_bets": settled}
 
 
+def _extract_row_odds(
+    row: dict,
+    columns: Dict[str, str],
+    bookmakers: Sequence[str],
+    closing_only: bool,
+) -> List[dict]:
+    """Cotes contenues dans une ligne de CSV football-data.co.uk.
+
+    Les cotes de clôture sont la partie précieuse : ce sont elles qui donnent
+    une barre à franchir à la calibration. Les cotes d'ouverture servent, elles,
+    à mesurer le mouvement de la ligne.
+    """
+    quotes: List[dict] = []
+
+    def read_odds(column_name: str) -> Optional[float]:
+        real = columns.get(column_name.lower())
+        if not real:
+            return None
+        raw = row.get(real)
+        if raw is None or str(raw).strip() == "":
+            return None
+        try:
+            value = float(str(raw).strip().replace(",", "."))
+        except ValueError:
+            return None
+        return value if value > 1.0 else None
+
+    for column, (market, selection, bookmaker, is_closing) in FOOTBALL_DATA_ODDS.items():
+        if bookmaker not in bookmakers or (closing_only and not is_closing):
+            continue
+        odds = read_odds(column)
+        if odds is None:
+            continue
+        quotes.append({
+            "market": market, "selection": selection,
+            "odds": odds, "bookmaker": bookmaker, "is_closing": is_closing,
+        })
+
+    for line_column, home_column, away_column, bookmaker, is_closing in FOOTBALL_DATA_HANDICAPS:
+        if bookmaker not in bookmakers or (closing_only and not is_closing):
+            continue
+        real_line = columns.get(line_column.lower())
+        if not real_line:
+            continue
+        raw_line = row.get(real_line)
+        if raw_line is None or str(raw_line).strip() == "":
+            continue
+        try:
+            line = float(str(raw_line).strip().replace(",", "."))
+        except ValueError:
+            continue
+        home_odds, away_odds = read_odds(home_column), read_odds(away_column)
+        if home_odds is None or away_odds is None:
+            continue
+        # Même convention que le moteur : la ligne s'ajoute à l'écart de buts
+        # vu du domicile, donc « domicile −0,5 » s'écrit AH_-0.5.
+        market = f"AH_{float(line)}"
+        quotes.append({
+            "market": market, "selection": "HOME", "odds": home_odds,
+            "bookmaker": bookmaker, "is_closing": is_closing,
+        })
+        quotes.append({
+            "market": market, "selection": "AWAY", "odds": away_odds,
+            "bookmaker": bookmaker, "is_closing": is_closing,
+        })
+
+    return quotes
+
+
 @router.post("/matches/import")
 def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
     """Import CSV de matchs terminés (voir `ImportIn` pour les colonnes)."""
@@ -777,8 +925,14 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
         except ValueError:
             return None
 
+    bookmakers = tuple(payload.odds_bookmakers or DEFAULT_ODDS_BOOKMAKERS)
+    wants_odds = payload.import_odds and bool(
+        set(FOOTBALL_DATA_ODDS) & {name.strip() for name in reader.fieldnames}
+    )
+
     created = skipped = 0
     errors: List[str] = []
+    pending_odds: List[Tuple[SportMatch, List[dict]]] = []
     for index, row in enumerate(reader, start=2):
         home_name = (row.get(mapping["home"]) or "").strip()
         away_name = (row.get(mapping["away"]) or "").strip()
@@ -832,6 +986,31 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
         db.add(match)
         created += 1
 
+        if wants_odds:
+            quotes = _extract_row_odds(row, lowered, bookmakers, payload.closing_odds_only)
+            if quotes:
+                pending_odds.append((match, quotes))
+
+    # Les identifiants de match ne sont attribués qu'au flush : on écrit donc
+    # les cotes en une seule passe, après.
+    odds_created = closing_created = 0
+    if pending_odds:
+        db.flush()
+        for match, quotes in pending_odds:
+            for quote in quotes:
+                db.add(OddsQuote(
+                    match_id=match.id,
+                    market=quote["market"],
+                    selection=quote["selection"],
+                    odds=quote["odds"],
+                    bookmaker=quote["bookmaker"],
+                    is_closing=quote["is_closing"],
+                    captured_at=match.kickoff,
+                ))
+                odds_created += 1
+                if quote["is_closing"]:
+                    closing_created += 1
+
     db.commit()
     return {
         "competition_id": comp.id,
@@ -840,6 +1019,16 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
         "skipped": skipped,
         "errors": errors,
         "teams_total": db.query(SportTeam).filter(SportTeam.competition_id == comp.id).count(),
+        "odds_created": odds_created,
+        "closing_odds_created": closing_created,
+        "odds_bookmakers": list(bookmakers) if wants_odds else [],
+        "odds_note": (
+            "Cotes de clôture importées : la calibration peut confronter le "
+            "modèle au marché sur ces matchs."
+            if closing_created else
+            "Aucune cote de clôture dans ce fichier — la calibration restera "
+            "sans barre à franchir."
+        ),
     }
 
 
@@ -858,14 +1047,36 @@ def list_odds(match_id: int, db: Session = Depends(get_db)):
             "bookmaker": q.bookmaker, "is_closing": q.is_closing,
             "captured_at": q.captured_at.isoformat() if q.captured_at else None,
         })
-    margins = {
-        market: an.overround([row["odds"] for row in rows])
-        for market, rows in grouped.items()
-    }
+    # La marge n'a de sens que pour un book donné : additionner les cotes de six
+    # opérateurs donnerait un « 500 % » qui ne veut rien dire.
+    margins: Dict[str, Optional[float]] = {}
+    margin_detail: Dict[str, List[dict]] = {}
+    for market, rows in grouped.items():
+        by_book: Dict[Tuple[str, bool], List[float]] = {}
+        for row in rows:
+            key = (row["bookmaker"] or "—", bool(row["is_closing"]))
+            by_book.setdefault(key, []).append(row["odds"])
+        detail = []
+        for (bookmaker, is_closing), odds in by_book.items():
+            value = an.overround(odds)
+            if value is None:
+                continue
+            detail.append({
+                "bookmaker": bookmaker,
+                "is_closing": is_closing,
+                "margin": round(value, 4),
+                "selections": len(odds),
+            })
+        detail.sort(key=lambda d: d["margin"])
+        margin_detail[market] = detail
+        # La marge retenue est la plus faible : celle du book le plus serré.
+        margins[market] = detail[0]["margin"] if detail else None
+
     return {
         "match_id": match_id,
         "markets": grouped,
-        "margins": {k: (round(v, 4) if v is not None else None) for k, v in margins.items()},
+        "margins": margins,
+        "margin_detail": margin_detail,
     }
 
 
@@ -903,29 +1114,54 @@ def delete_odds(quote_id: int, db: Session = Depends(get_db)):
 #  CALIBRATION — LE MODÈLE BAT-IL LE MARCHÉ ?
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _market_quotes(match: SportMatch, market_key: str) -> Dict[str, float]:
-    """Cotes d'un marché pour un match, en privilégiant la cote de clôture."""
-    best: Dict[str, dict] = {}
+#: Ordre de préférence des bookmakers pour lire l'avis du marché. Pinnacle
+#: passe en premier : c'est l'opérateur dont la ligne sert de référence à toute
+#: l'industrie. Faute de mieux, la moyenne du marché, puis la meilleure cote.
+BOOKMAKER_PREFERENCE = ("Pinnacle", "Moyenne", "Meilleure")
+
+
+def _market_quotes(
+    match: SportMatch,
+    market_key: str,
+    preference: Sequence[str] = BOOKMAKER_PREFERENCE,
+) -> Dict[str, float]:
+    """Cotes d'un marché pour un match, vues d'un seul bookmaker à la fois.
+
+    Comparer le modèle à un panachage de books n'aurait pas de sens : on
+    cherche la ligne **complète** la plus proche possible de la clôture d'un
+    opérateur de référence, en descendant l'ordre de préférence.
+    """
+    lines: Dict[Tuple[str, bool], Dict[str, dict]] = {}
     for quote in match.odds_quotes:
         if quote.market != market_key or not quote.odds or quote.odds <= 1.0:
             continue
-        current = best.get(quote.selection)
-        # La cote de clôture prime ; sinon on garde la plus récente.
-        if (
-            current is None
-            or (quote.is_closing and not current["is_closing"])
-            or (
-                quote.is_closing == current["is_closing"]
-                and (quote.captured_at or datetime.min.replace(tzinfo=timezone.utc))
-                > (current["captured_at"] or datetime.min.replace(tzinfo=timezone.utc))
-            )
+        key = (quote.bookmaker or "—", bool(quote.is_closing))
+        current = lines.setdefault(key, {}).get(quote.selection)
+        if current is None or (
+            (quote.captured_at or datetime.min.replace(tzinfo=timezone.utc))
+            > (current["captured_at"] or datetime.min.replace(tzinfo=timezone.utc))
         ):
-            best[quote.selection] = {
+            lines[key][quote.selection] = {
                 "odds": quote.odds,
-                "is_closing": bool(quote.is_closing),
                 "captured_at": quote.captured_at,
             }
-    return {selection: row["odds"] for selection, row in best.items()}
+    if not lines:
+        return {}
+
+    def rank(key: Tuple[str, bool]) -> Tuple[int, int, int]:
+        bookmaker, is_closing = key
+        try:
+            book_rank = preference.index(bookmaker)
+        except ValueError:
+            book_rank = len(preference)
+        # Clôture d'abord, puis ordre de préférence, puis ligne la plus fournie.
+        return (0 if is_closing else 1, book_rank, -len(lines[key]))
+
+    for key in sorted(lines, key=rank):
+        selections = lines[key]
+        if len(selections) >= 2:
+            return {sel: row["odds"] for sel, row in selections.items()}
+    return {}
 
 
 def _forecast_records(
@@ -935,6 +1171,7 @@ def _forecast_records(
     min_history: int = 30,
     limit: int = 600,
     devig: str = "proportional",
+    bookmaker: Optional[str] = None,
 ) -> Tuple[List[cal.ForecastRecord], dict]:
     """Rejoue l'historique pour confronter le modèle au marché, match par match.
 
@@ -951,6 +1188,9 @@ def _forecast_records(
     matches = query.order_by(SportMatch.kickoff).all()
 
     names = _team_names(db)
+    preference = (
+        (bookmaker,) + BOOKMAKER_PREFERENCE if bookmaker else BOOKMAKER_PREFERENCE
+    )
     by_competition: Dict[int, List[SportMatch]] = {}
     for match in matches:
         by_competition.setdefault(match.competition_id, []).append(match)
@@ -971,7 +1211,7 @@ def _forecast_records(
             """Évalue les matchs d'une même journée avec les forces d'avant-match."""
             nonlocal strengths, baseline
             for match in pending_day:
-                quotes = _market_quotes(match, market_key)
+                quotes = _market_quotes(match, market_key, preference)
                 if len(quotes) < 2:
                     stats["without_odds"] += 1
                     continue
@@ -995,7 +1235,12 @@ def _forecast_records(
                     strengths.get(match.away_team_id),
                     baseline,
                 )
-                model_markets = an.market_probabilities(an.score_grid(lam_h, lam_a))
+                model_markets = an.market_probabilities(
+                    an.score_grid(lam_h, lam_a),
+                    handicap_lines=an.handicap_lines_from_quotes(
+                        [{"market": market_key}]
+                    ),
+                )
                 model = model_markets.get(market_key)
                 if not model or any(sel not in model for sel in quotes):
                     stats["without_odds"] += 1
@@ -1112,6 +1357,8 @@ def calibration(
     min_history: int = Query(30, ge=10, le=500),
     limit: int = Query(600, ge=50, le=2000),
     devig: str = Query("proportional", pattern="^(proportional|odds_ratio|power)$"),
+    bookmaker: Optional[str] = Query(
+        None, description="Bookmaker de référence (défaut : Pinnacle, puis moyenne du marché)"),
     db: Session = Depends(get_db),
 ):
     """Confronte le modèle à la cote de clôture, prévision par prévision.
@@ -1123,7 +1370,7 @@ def calibration(
     market_key = market.strip().upper()
     records, stats = _forecast_records(
         db, competition_id=competition_id, market_key=market_key,
-        min_history=min_history, limit=limit, devig=devig,
+        min_history=min_history, limit=limit, devig=devig, bookmaker=bookmaker,
     )
     report = cal.calibration_report(records)
 
@@ -1164,6 +1411,7 @@ def calibration(
             "reference_odds": round(average_odds, 2),
         },
         "devig": devig,
+        "bookmaker": bookmaker or BOOKMAKER_PREFERENCE[0],
         "note": (
             "Chaque prévision n'utilise que les matchs joués avant le coup d'envoi, "
             "et la cote retenue est celle de clôture quand elle a été saisie. "
@@ -1365,7 +1613,10 @@ def _scan_value_bets(
             strengths.get(match.home_team_id), strengths.get(match.away_team_id),
             baseline, match.home_boost or 1.0, match.away_boost or 1.0,
         )
-        markets = an.market_probabilities(an.score_grid(lam_h, lam_a))
+        markets = an.market_probabilities(
+            an.score_grid(lam_h, lam_a),
+            handicap_lines=an.handicap_lines_from_quotes(quotes),
+        )
         confidence = an.sample_confidence(
             len(an.team_matches(history, match.home_team_id)),
             len(an.team_matches(history, match.away_team_id)),
@@ -1461,7 +1712,10 @@ def backtest(
                     strengths.get(match.home_team_id),
                     strengths.get(match.away_team_id), baseline,
                 )
-                markets = an.market_probabilities(an.score_grid(lam_h, lam_a))
+                markets = an.market_probabilities(
+                    an.score_grid(lam_h, lam_a),
+                    handicap_lines=an.handicap_lines_from_quotes(quotes),
+                )
                 for pick in an.find_value_bets(
                     markets, quotes, min_edge=min_edge, market_weight=market_weight,
                     edge_haircut=edge_haircut,

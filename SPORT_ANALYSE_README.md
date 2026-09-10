@@ -174,7 +174,8 @@ backend/app/calibration_sport.py calibration face au marché, significativité, 
 backend/app/models_sport.py      tables : compétitions, équipes, matchs, cotes, paris, bankroll
 backend/app/router_sport.py      API REST /sport
 backend/migrations/sport_v1.sql  migration SQL idempotente
-backend/tests/                   122 tests des deux moteurs (unittest, sans dépendance)
+backend/scripts/                 téléchargement de saisons réelles (football-data.co.uk)
+backend/tests/                   139 tests (moteurs sans dépendance + régression sur l'import)
 sport-dashboard/                 interface React + Vite (port 5177)
 ```
 
@@ -222,12 +223,80 @@ cotés, bankroll de départ) : de quoi parcourir toutes les vues sans saisie.
 cd backend && python3 -m unittest discover -s tests -v
 ```
 
+Les tests des deux moteurs ne dépendent de rien d'autre que la bibliothèque
+standard. La régression sur l'import du format football-data.co.uk a besoin de
+FastAPI et SQLAlchemy — déjà requis par le backend — et se désactive d'elle-même
+s'ils manquent.
+
 ---
 
-## 5. Alimenter l'outil avec ses propres données
+## 5. Alimenter l'outil avec de vraies données
 
-L'import CSV (onglet **Données**) accepte le séparateur `,` ou `;` et reconnaît
-les en-têtes usuels :
+### La voie rapide : une saison réelle en une commande
+
+[football-data.co.uk](https://www.football-data.co.uk/) publie gratuitement,
+pour les principaux championnats européens, les scores, les statistiques de
+match **et les cotes de clôture de plusieurs bookmakers**. Ce dernier point est
+décisif : sans cotes de clôture, la calibration n'a aucune barre à franchir et
+l'onglet Réalisme ne peut rien conclure.
+
+```bash
+# L'API doit tourner sur http://localhost:8000
+python3 backend/scripts/fetch_football_data.py E0 2223 2324 2425
+```
+
+Trois saisons de Premier League, soit ~1 140 matchs et plusieurs dizaines de
+milliers de cotes, dont celles de clôture. Puis :
+
+```bash
+curl -s 'http://localhost:8000/sport/calibration?market=1X2' | python3 -m json.tool
+```
+
+…ou l'onglet **Réalisme**, qui répond à la seule question qui compte :
+*votre modèle bat-il la cote de clôture sur vos championnats ?*
+
+Autres usages du script :
+
+```bash
+# Plusieurs championnats d'un coup
+python3 backend/scripts/fetch_football_data.py --leagues E0,F1,SP1,D1,I1 2425
+
+# Télécharger sans importer, pour inspecter les fichiers
+python3 backend/scripts/fetch_football_data.py E0 2425 --out ./data --no-import
+
+# N'importer que les cotes de clôture de Pinnacle
+python3 backend/scripts/fetch_football_data.py E0 2425 \
+    --closing-only --bookmakers Pinnacle
+```
+
+Codes utiles : `E0` Premier League · `E1` Championship · `F1` Ligue 1 ·
+`D1` Bundesliga · `SP1` Liga · `I1` Serie A · `N1` Eredivisie · `P1` Portugal ·
+`B1` Belgique · `T1` Turquie. Le code de saison joint les deux millésimes :
+`2425` = 2024/2025.
+
+### Les cotes importées
+
+| Colonnes du fichier | Ce qui est enregistré |
+|---|---|
+| `PSCH` / `PSCD` / `PSCA` | 1X2, **clôture Pinnacle** — la ligne de référence |
+| `AvgCH` / `MaxCH`… | 1X2 clôture, moyenne du marché et meilleure cote |
+| `PSH` / `B365H` / `AvgH`… | 1X2 à l'ouverture, pour mesurer le mouvement de ligne |
+| `PC>2.5` / `AvgC>2.5`… | plus/moins de 2,5 buts, ouverture et clôture |
+| `AHCh` + `PCAHH` / `PCAHA` | handicap asiatique, ligne comprise (quarts de but inclus) |
+| `BbAvH`, `BbAv>2.5`… | anciennes saisons (préfixe Betbrain, jusqu'à 2018/2019) |
+
+Par défaut, trois bookmakers sont retenus — **Pinnacle** (la référence sharp),
+**Moyenne** du marché et **Meilleure** cote — plutôt que la vingtaine de
+colonnes disponibles, qui n'ajouteraient que du volume.
+
+L'application applique alors la pratique réelle d'un parieur : **l'avis du
+marché se lit sur la ligne de Pinnacle**, la plus serrée, tandis que **la mise
+se joue à la meilleure cote trouvée**. La marge affichée est celle du book de
+référence, jamais un panachage.
+
+### Import manuel
+
+L'onglet **Données** accepte n'importe quel CSV, séparateur `,` ou `;` :
 
 | Champ | Colonnes acceptées |
 |---|---|
@@ -237,10 +306,13 @@ les en-têtes usuels :
 | Bonus | `home_xg`, `away_xg`, `HS`/`AS`, `HST`/`AST`, `HC`/`AC`, `matchday` |
 
 Les équipes inconnues sont créées automatiquement et un même match ne peut pas
-être importé deux fois. Le format de football-data.co.uk passe tel quel.
+être importé deux fois — le script de téléchargement est donc rejouable sans
+risque de doublon.
 
 **Ordre de grandeur utile** : le modèle devient exploitable vers 6-10 matchs par
-équipe, et fiable au-delà de 20. En dessous, l'application le signale.
+équipe, et fiable au-delà de 20. Pour *juger* le modèle, il faut davantage :
+la calibration ne conclut qu'à partir de 100 prévisions cotées, soit environ une
+demi-saison de championnat.
 
 ---
 
@@ -257,7 +329,7 @@ Les équipes inconnues sont créées automatiquement et un même match ne peut p
 | GET | `/sport/risk-simulation` | Monte-Carlo : avantage cru contre avantage réel |
 | GET | `/sport/competitions/{id}/table` | classement enrichi + forces d'équipe |
 | GET | `/sport/teams/{id}/stats` | fiche d'équipe (forme, domicile/extérieur, Elo) |
-| POST | `/sport/matches/import` | import CSV en masse |
+| POST | `/sport/matches/import` | import CSV en masse, **cotes comprises** |
 | POST | `/sport/matches/{id}/odds` | saisie des cotes |
 | POST | `/sport/bets` · PUT `/sport/bets/{id}/settle` | suivi des paris |
 | PUT | `/sport/matches/{id}/result` | score final + **règlement automatique des paris** |

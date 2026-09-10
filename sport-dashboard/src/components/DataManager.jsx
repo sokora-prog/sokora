@@ -386,7 +386,12 @@ export default function DataManager({ competitions, teams, onChanged }) {
                       <td>{marketLabel(market, row.selection)}{row.is_closing ? ' (clôture)' : ''}</td>
                       <td className="num">{nf(row.odds)}</td>
                       <td>{row.bookmaker || '—'}</td>
-                      <td className="num">
+                      <td
+                        className="num"
+                        title={(existingOdds.margin_detail?.[market] || [])
+                          .map(d => `${d.bookmaker}${d.is_closing ? ' (clôture)' : ''} : ${nf(d.margin * 100, 2)} %`)
+                          .join('\n')}
+                      >
                         {existingOdds.margins[market] != null
                           ? `${nf(existingOdds.margins[market] * 100, 2)} %`
                           : '—'}
@@ -413,6 +418,8 @@ export default function DataManager({ competitions, teams, onChanged }) {
           Enregistrez toutes les sélections d'un marché : c'est la seule façon de
           retirer la marge du bookmaker et d'obtenir sa vraie probabilité. Une marge
           supérieure à 7 % rend la valeur très difficile à trouver sur ce marché.
+          La marge affichée est la plus faible parmi les bookmakers enregistrés
+          (survolez-la pour le détail).
         </div>
       </div>
     </div>

@@ -613,6 +613,28 @@ def asian_handicap(grid: Sequence[Sequence[float]], line: float) -> Dict[str, fl
     return out
 
 
+def handicap_lines_from_quotes(
+    quotes: Sequence[dict],
+    defaults: Sequence[float] = DEFAULT_HANDICAP_LINES,
+) -> Tuple[float, ...]:
+    """Lignes de handicap à coter, complétées par celles présentes dans les cotes.
+
+    Les fichiers réels proposent des lignes que le jeu par défaut ne couvre pas
+    (−0,25, −0,75, +1,25…). Sans cet ajout, les cotes importées resteraient
+    lettre morte faute de probabilité en face.
+    """
+    lines = set(float(line) for line in defaults)
+    for quote in quotes:
+        market = str(quote.get("market") or "").strip().upper()
+        if not market.startswith("AH_"):
+            continue
+        try:
+            lines.add(float(market[3:]))
+        except ValueError:
+            continue
+    return tuple(sorted(lines))
+
+
 def market_probabilities(
     grid: Sequence[Sequence[float]],
     total_lines: Sequence[float] = DEFAULT_TOTAL_LINES,
@@ -1058,6 +1080,7 @@ def find_value_bets(
     market_weight: float = 0.35,
     devig_method: str = "odds_ratio",
     edge_haircut: float = DEFAULT_EDGE_HAIRCUT,
+    reference_bookmaker: Optional[str] = "Pinnacle",
 ) -> List[dict]:
     """Compare les probabilités du modèle aux cotes disponibles.
 
@@ -1069,7 +1092,12 @@ def find_value_bets(
     1. la marge du bookmaker est retirée du marché complet → probabilité
        « no-vig », c'est-à-dire l'avis réel du marché ;
     2. la probabilité retenue mêle modèle et marché (``market_weight``) : sur un
-       marché liquide, le marché est le meilleur estimateur disponible ;
+       marché liquide, le marché est le meilleur estimateur disponible. Quand
+       plusieurs bookmakers sont enregistrés, l'avis du marché est lu sur la
+       ligne du book de référence (``reference_bookmaker``, Pinnacle par
+       défaut), tandis que la mise se joue à la **meilleure** cote trouvée :
+       c'est exactement la pratique d'un parieur sérieux — se fier au book qui
+       fixe le prix, jouer chez celui qui le paie le mieux ;
     3. l'edge obtenu subit une **décote** (``edge_haircut``) qui compense le
        biais de sélection : on ne garde que la meilleure sélection, or le
        maximum d'estimations bruitées est systématiquement trop optimiste.
@@ -1078,6 +1106,7 @@ def find_value_bets(
     l'estimation brute. Retourne les sélections triées par edge net décroissant.
     """
     by_market: Dict[str, Dict[str, dict]] = {}
+    by_book: Dict[str, Dict[str, Dict[str, float]]] = {}
     for q in quotes:
         market = str(q.get("market") or "").strip()
         selection = str(q.get("selection") or "").strip().upper()
@@ -1092,14 +1121,28 @@ def find_value_bets(
                 "bookmaker": q.get("bookmaker"),
                 "captured_at": q.get("captured_at"),
             }
+        book = q.get("bookmaker")
+        if book:
+            by_book.setdefault(market, {}).setdefault(str(book), {})[selection] = float(odds)
 
     results: List[dict] = []
     for market, selections in by_market.items():
         model = model_markets.get(market) or {}
         if not model:
             continue
-        novig = remove_margin({s: v["odds"] for s, v in selections.items()}, devig_method)
-        margin = overround([v["odds"] for v in selections.values()])
+
+        # Ligne servant à lire l'avis du marché : celle du book de référence
+        # quand elle est complète, sinon l'assemblage des meilleures cotes.
+        reference_line = None
+        if reference_bookmaker:
+            candidate = (by_book.get(market) or {}).get(reference_bookmaker)
+            if candidate and set(candidate) >= set(selections):
+                reference_line = candidate
+        source = reference_bookmaker if reference_line else "meilleures cotes"
+        pricing_line = reference_line or {s: v["odds"] for s, v in selections.items()}
+
+        novig = remove_margin(pricing_line, devig_method)
+        margin = overround(list(pricing_line.values()))
         for selection, quote in selections.items():
             p_model = model.get(selection)
             if p_model is None:
@@ -1129,6 +1172,7 @@ def find_value_bets(
                 "edge": round(net_edge, 4),
                 "edge_pct": round(net_edge * 100, 2),
                 "bookmaker_margin": round(margin, 4) if margin is not None else None,
+                "market_source": source,
                 "kelly": stake,
                 "is_value": net_edge >= min_edge,
             })
@@ -1205,6 +1249,7 @@ def analyse_match(
     kelly_cap: float = 0.05,
     market_weight: float = 0.35,
     edge_haircut: float = DEFAULT_EDGE_HAIRCUT,
+    reference_bookmaker: Optional[str] = "Pinnacle",
     home_boost: float = 1.0,
     away_boost: float = 1.0,
     form_window: int = 10,
@@ -1222,7 +1267,9 @@ def analyse_match(
 
     lam_h, lam_a = expected_goals(home_st, away_st, baseline, home_boost, away_boost)
     grid = score_grid(lam_h, lam_a, max_goals=max_goals, rho=rho)
-    markets = market_probabilities(grid)
+    markets = market_probabilities(
+        grid, handicap_lines=handicap_lines_from_quotes(quotes)
+    )
 
     elo = elo_ratings(history)
     elo_h = elo.get(home_team, 1500.0)
@@ -1236,6 +1283,7 @@ def analyse_match(
         markets, quotes, bankroll=bankroll, min_edge=min_edge,
         kelly_fraction=kelly_fraction, kelly_cap=kelly_cap,
         market_weight=market_weight, edge_haircut=edge_haircut,
+        reference_bookmaker=reference_bookmaker,
     )
 
     return {

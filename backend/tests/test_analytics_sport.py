@@ -628,6 +628,106 @@ class TestEdgeHaircut(unittest.TestCase):
         self.assertTrue(any("décote" in w for w in verdict["warnings"]))
 
 
+class TestReferenceBookmaker(unittest.TestCase):
+    """Lire le marché chez le book de référence, jouer à la meilleure cote."""
+
+    MODEL = {"1X2": {"HOME": 0.45, "DRAW": 0.28, "AWAY": 0.27}}
+
+    def quotes(self, include_reference=True, complete_reference=True):
+        rows = [
+            {"market": "1X2", "selection": "HOME", "odds": 2.35, "bookmaker": "Meilleure"},
+            {"market": "1X2", "selection": "DRAW", "odds": 3.70, "bookmaker": "Meilleure"},
+            {"market": "1X2", "selection": "AWAY", "odds": 3.60, "bookmaker": "Meilleure"},
+        ]
+        if include_reference:
+            rows += [
+                {"market": "1X2", "selection": "HOME", "odds": 2.20, "bookmaker": "Pinnacle"},
+                {"market": "1X2", "selection": "DRAW", "odds": 3.55, "bookmaker": "Pinnacle"},
+            ]
+            if complete_reference:
+                rows.append(
+                    {"market": "1X2", "selection": "AWAY", "odds": 3.45, "bookmaker": "Pinnacle"}
+                )
+        return rows
+
+    def test_market_is_read_on_the_reference_line(self):
+        found = an.find_value_bets(self.MODEL, self.quotes(), edge_haircut=0.0)
+        for row in found:
+            self.assertEqual(row["market_source"], "Pinnacle")
+        # La marge affichée est celle de Pinnacle, pas celle du panachage.
+        self.assertLess(found[0]["bookmaker_margin"], 0.05)
+        self.assertGreater(found[0]["bookmaker_margin"], 0)
+
+    def test_stake_is_placed_at_the_best_available_price(self):
+        found = an.find_value_bets(self.MODEL, self.quotes(), edge_haircut=0.0)
+        home = next(r for r in found if r["selection"] == "HOME")
+        self.assertEqual(home["odds"], 2.35)
+        self.assertEqual(home["bookmaker"], "Meilleure")
+
+    def test_incomplete_reference_line_falls_back(self):
+        found = an.find_value_bets(
+            self.MODEL, self.quotes(complete_reference=False), edge_haircut=0.0
+        )
+        for row in found:
+            self.assertEqual(row["market_source"], "meilleures cotes")
+
+    def test_quotes_without_bookmaker_still_work(self):
+        rows = [
+            {"market": "1X2", "selection": "HOME", "odds": 2.30},
+            {"market": "1X2", "selection": "DRAW", "odds": 3.60},
+            {"market": "1X2", "selection": "AWAY", "odds": 3.50},
+        ]
+        found = an.find_value_bets(self.MODEL, rows, edge_haircut=0.0)
+        self.assertEqual(found[0]["market_source"], "meilleures cotes")
+        self.assertEqual(len(found), 3)
+
+    def test_reference_can_be_changed_or_disabled(self):
+        chosen = an.find_value_bets(
+            self.MODEL, self.quotes(), edge_haircut=0.0, reference_bookmaker="Meilleure"
+        )
+        self.assertEqual(chosen[0]["market_source"], "Meilleure")
+        disabled = an.find_value_bets(
+            self.MODEL, self.quotes(), edge_haircut=0.0, reference_bookmaker=None
+        )
+        self.assertEqual(disabled[0]["market_source"], "meilleures cotes")
+
+
+class TestHandicapLinesFromQuotes(unittest.TestCase):
+    """Les lignes de handicap réelles doivent être cotées par le modèle."""
+
+    def test_extra_lines_are_added_to_the_defaults(self):
+        quotes = [
+            {"market": "AH_-0.75", "selection": "HOME", "odds": 1.95},
+            {"market": "AH_1.25", "selection": "AWAY", "odds": 2.05},
+            {"market": "1X2", "selection": "HOME", "odds": 2.10},
+        ]
+        lines = an.handicap_lines_from_quotes(quotes)
+        self.assertIn(-0.75, lines)
+        self.assertIn(1.25, lines)
+        for default in an.DEFAULT_HANDICAP_LINES:
+            self.assertIn(default, lines)
+        self.assertEqual(list(lines), sorted(lines))
+
+    def test_unparseable_markets_are_ignored(self):
+        lines = an.handicap_lines_from_quotes([{"market": "AH_bizarre", "selection": "HOME"}])
+        self.assertEqual(set(lines), set(an.DEFAULT_HANDICAP_LINES))
+
+    def test_imported_line_gets_priced_and_compared(self):
+        history, _ = make_league(rounds=30)
+        quotes = [
+            {"market": "AH_-0.75", "selection": "HOME", "odds": 1.98, "bookmaker": "Pinnacle"},
+            {"market": "AH_-0.75", "selection": "AWAY", "odds": 1.92, "bookmaker": "Pinnacle"},
+        ]
+        result = an.analyse_match(
+            history, "T9", "T0", quotes=quotes, reference=D + timedelta(days=300)
+        )
+        self.assertIn("AH_-0.75", result["markets"])
+        self.assertTrue(
+            any(v["market"] == "AH_-0.75" for v in result["value_bets"]),
+            "la ligne importée doit être confrontée à sa cote",
+        )
+
+
 class TestAnalyseMatch(unittest.TestCase):
 
     def test_full_analysis_structure(self):
