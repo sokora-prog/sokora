@@ -1,0 +1,63 @@
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+const api = axios.create({ baseURL: API_URL });
+
+/** Message d'erreur lisible, quelle que soit la forme de la réponse FastAPI. */
+export function errorMessage(error) {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(d => `${(d.loc || []).slice(-1)[0]} : ${d.msg}`).join(' · ');
+  }
+  return error?.message || 'Erreur inconnue';
+}
+
+export const sportApi = {
+  dashboard:      ()               => api.get('/sport/dashboard'),
+
+  // Compétitions
+  competitions:   ()               => api.get('/sport/competitions'),
+  createCompetition: d             => api.post('/sport/competitions', d),
+  deleteCompetition: id            => api.delete(`/sport/competitions/${id}`),
+  table:          id               => api.get(`/sport/competitions/${id}/table`),
+
+  // Équipes
+  teams:          params           => api.get('/sport/teams', { params }),
+  createTeam:     d                => api.post('/sport/teams', d),
+  teamStats:      (id, last = 10)  => api.get(`/sport/teams/${id}/stats`, { params: { last } }),
+
+  // Matchs
+  matches:        params           => api.get('/sport/matches', { params }),
+  createMatch:    d                => api.post('/sport/matches', d),
+  updateMatch:    (id, d)          => api.put(`/sport/matches/${id}`, d),
+  deleteMatch:    id               => api.delete(`/sport/matches/${id}`),
+  setResult:      (id, d)          => api.put(`/sport/matches/${id}/result`, d),
+  importCsv:      d                => api.post('/sport/matches/import', d),
+
+  // Cotes
+  odds:           id               => api.get(`/sport/matches/${id}/odds`),
+  addOdds:        (id, d)          => api.post(`/sport/matches/${id}/odds`, d),
+  deleteOdds:     id               => api.delete(`/sport/odds/${id}`),
+
+  // Analyse
+  analysis:       (id, params)     => api.get(`/sport/matches/${id}/analysis`, { params }),
+  predict:        d                => api.post('/sport/predict', d),
+  valueBets:      params           => api.get('/sport/value-bets', { params }),
+  backtest:       params           => api.get('/sport/backtest', { params }),
+
+  // Paris et bankroll
+  bets:           params           => api.get('/sport/bets', { params }),
+  createBet:      d                => api.post('/sport/bets', d),
+  settleBet:      (id, d)          => api.put(`/sport/bets/${id}/settle`, d),
+  deleteBet:      id               => api.delete(`/sport/bets/${id}`),
+  performance:    ()               => api.get('/sport/performance'),
+  bankroll:       ()               => api.get('/sport/bankroll'),
+  addBankrollTx:  d                => api.post('/sport/bankroll/transactions', d),
+  deleteBankrollTx: id             => api.delete(`/sport/bankroll/transactions/${id}`),
+
+  seedDemo:       (params)         => api.post('/sport/seed-demo', null, { params }),
+};
+
+export default api;
