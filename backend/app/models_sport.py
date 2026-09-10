@@ -234,6 +234,54 @@ class SportBet(Base):
     match = relationship("SportMatch", back_populates="bets")
 
 
+class SportForecast(Base):
+    """Prévision **gelée avant le coup d'envoi**, puis notée après le match.
+
+    C'est le seul dispositif de mesure à l'abri du biais de rétrospection. La
+    calibration rejoue l'histoire, mais les réglages du modèle — demi-vie,
+    correction Dixon-Coles, rappel vers la moyenne — ont été choisis en
+    connaissant ces mêmes données : leur bon score y est donc partiellement
+    acquis d'avance.
+
+    Une prévision enregistrée ici ne peut plus être modifiée (contrainte
+    d'unicité sur match + marché + sélection) : elle sera notée telle quelle,
+    juste ou fausse. C'est ce qui la rend probante.
+    """
+    __tablename__ = "sport_forecasts"
+
+    id        = Column(Integer, primary_key=True, index=True)
+    match_id  = Column(Integer, ForeignKey("sport_matches.id"), nullable=False, index=True)
+    market    = Column(String(40), nullable=False)
+    selection = Column(String(40), nullable=False)
+
+    #: Avis du modèle au moment du gel.
+    model_probability  = Column(Float, nullable=False)
+    #: Avis du marché au même instant, marge retirée.
+    market_probability = Column(Float, nullable=True)
+    #: Meilleure cote disponible et cote du book de référence, pour le CLV.
+    best_odds      = Column(Float, nullable=True)
+    reference_odds = Column(Float, nullable=True)
+
+    #: Réglages en vigueur, pour pouvoir comparer des campagnes entre elles.
+    signal        = Column(String(20), default="goals")
+    market_weight = Column(Float, nullable=True)
+
+    kickoff    = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    #: Résultat : WON, LOST, VOID, ou NULL tant que le match n'est pas joué.
+    outcome     = Column(String(10), nullable=True, index=True)
+    closing_odds = Column(Float, nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    match = relationship("SportMatch")
+
+    __table_args__ = (
+        UniqueConstraint("match_id", "market", "selection", name="uq_sport_forecast"),
+        Index("ix_sport_forecast_market", "market", "outcome"),
+    )
+
+
 class BankrollTransaction(Base):
     """Mouvement de capital hors paris (dépôt, retrait, ajustement)."""
     __tablename__ = "sport_bankroll_transactions"

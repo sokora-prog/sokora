@@ -166,7 +166,70 @@ nettement sur le total de buts.
 
 ---
 
-## 3. Architecture
+## 3. Le laboratoire : chercher un avantage, et le prouver
+
+Constater que le modèle ne bat pas le marché est honnête mais stérile. Trois
+outils transforment ce constat en démarche.
+
+### a) Sur quoi mesurer une équipe ? — `GET /sport/model-comparison`
+
+Les buts sont l'issue qui compte, mais un indicateur bruité : un but tient à un
+poteau. Un tir cadré est une observation cinq à dix fois plus fréquente, donc
+bien plus stable. Le moteur accepte quatre **signaux d'estimation** :
+
+| Variante | Ce sur quoi la force est mesurée |
+|---|---|
+| `goals` | les buts marqués |
+| `shots` | les tirs cadrés (et, à moindre poids, les tirs tentés) |
+| `xg` | les buts attendus, quand le fichier les contient |
+| `blend` | 40 % buts, 60 % tirs |
+
+Le proxy est remis à l'échelle des buts, de sorte que les λ restent des buts et
+que les variantes soient comparables. Une statistique manquante fait retomber le
+match sur ses buts réels, et la **couverture** est affichée pour chaque variante.
+
+Aucune n'est déclarée meilleure a priori : le banc les rejoue toutes sur le même
+historique, face à la même cote de clôture, et tranche. Sur une saison au format
+réel, les tirs améliorent le score de Brier de 0,024 par rapport aux buts et
+font passer le poids marché optimal de 1,00 à 0,93 — **sans battre le marché
+pour autant**, ce que le banc dit tel quel.
+
+### b) Où se situe l'avantage ? — `GET /sport/edge-map`
+
+Personne n'a d'avantage partout. Le skill score est donc mesuré par
+compétition, par marché, par type d'affiche (favori net, favori modéré, match
+ouvert) et par total attendu. Chaque segment reçoit un effectif minimal
+(60 prévisions), un test de significativité sur l'écart de score match par
+match, et un état : `AVANTAGE ÉTAYÉ`, `PAS D'AVANTAGE`, `ÉCHANTILLON TROP COURT`.
+
+Le piège du découpage est nommé explicitement dans la réponse : plus on
+segmente, plus une poche gagnante par pur hasard devient probable. Le nombre de
+comparaisons effectuées est rappelé à chaque fois.
+
+**Conséquence opérationnelle** : `GET /sport/value-bets?only_proven=true` — actif
+par défaut dans l'interface — ne propose que les sélections appartenant à une
+poche démontrée. Tant qu'aucune ne l'est, la liste est vide, et c'est la bonne
+réponse.
+
+### c) Le journal de prévisions — `POST /sport/forecasts/snapshot`
+
+La calibration rejoue le passé, mais les réglages du modèle — demi-vie,
+correction Dixon-Coles, rappel vers la moyenne — ont été choisis en connaissant
+ces mêmes données. Leur bon score y est donc partiellement acquis d'avance.
+
+Le journal supprime cette objection : les prévisions sont **gelées avant le coup
+d'envoi**, ne peuvent plus être réécrites (contrainte d'unicité), sont notées
+automatiquement à la saisie du score, et le bilan
+(`GET /sport/forecasts/scoreboard`) les confronte au marché. C'est plus lent —
+il faut attendre que les matchs se jouent — mais rien ne permet de l'embellir
+après coup.
+
+Un match déjà commencé ne peut pas fonder une prévision ; une prévision peut être
+supprimée, mais l'API prévient que retirer les ratées revient à se mentir.
+
+---
+
+## 4. Architecture
 
 ```
 backend/app/analytics_sport.py   moteur statistique pur (aucune dépendance, aucun accès base)
@@ -175,7 +238,7 @@ backend/app/models_sport.py      tables : compétitions, équipes, matchs, cotes
 backend/app/router_sport.py      API REST /sport
 backend/migrations/sport_v1.sql  migration SQL idempotente
 backend/scripts/                 téléchargement de saisons réelles (football-data.co.uk)
-backend/tests/                   139 tests (moteurs sans dépendance + régression sur l'import)
+backend/tests/                   169 tests (moteurs sans dépendance + régressions import et journal)
 sport-dashboard/                 interface React + Vite (port 5177)
 ```
 
@@ -184,7 +247,7 @@ statistique testable ligne à ligne, et réutilisable hors de l'API.
 
 ---
 
-## 4. Démarrage
+## 5. Démarrage
 
 ### Backend
 
@@ -230,7 +293,7 @@ s'ils manquent.
 
 ---
 
-## 5. Alimenter l'outil avec de vraies données
+## 6. Alimenter l'outil avec de vraies données
 
 ### La voie rapide : une saison réelle en une commande
 
@@ -316,7 +379,7 @@ demi-saison de championnat.
 
 ---
 
-## 6. Principaux points d'API
+## 7. Principaux points d'API
 
 | Méthode | Chemin | Rôle |
 |---|---|---|
@@ -327,6 +390,10 @@ demi-saison de championnat.
 | GET | `/sport/backtest` | simulation historique sans fuite d'information |
 | GET | `/sport/calibration` | **le modèle bat-il la cote de clôture ?** |
 | GET | `/sport/risk-simulation` | Monte-Carlo : avantage cru contre avantage réel |
+| GET | `/sport/model-comparison` | **banc d'essai des variantes de modèle** |
+| GET | `/sport/edge-map` | **où se situe l'avantage, s'il en existe un** |
+| POST | `/sport/forecasts/snapshot` | **geler les prévisions avant le coup d'envoi** |
+| GET | `/sport/forecasts/scoreboard` | bilan du journal, en conditions réelles |
 | GET | `/sport/competitions/{id}/table` | classement enrichi + forces d'équipe |
 | GET | `/sport/teams/{id}/stats` | fiche d'équipe (forme, domicile/extérieur, Elo) |
 | POST | `/sport/matches/import` | import CSV en masse, **cotes comprises** |
@@ -340,7 +407,7 @@ Paramètres réglables sur l'analyse : `min_edge`, `kelly_fraction`,
 
 ---
 
-## 7. Limites à connaître
+## 8. Limites à connaître
 
 - **Le modèle ignore ce qu'il ne voit pas** : blessures, suspensions, enjeu,
   météo, calendrier européen. Les champs `home_boost` / `away_boost` (1,00 =
@@ -357,6 +424,14 @@ Paramètres réglables sur l'analyse : `min_edge`, `kelly_fraction`,
 - **La calibration ne se transpose pas d'un marché à l'autre.** Un modèle qui
   bat la cote sur le 1X2 peut être franchement mauvais sur le total de buts.
   Mesurez chaque marché séparément avant de le jouer.
+- **Une poche gagnante n'est pas une preuve.** La carte des avantages teste une
+  dizaine de segments : sur dix tests indépendants, un résultat à p < 0,10 est
+  attendu par pur hasard. Une poche ne devient crédible qu'après confirmation
+  sur des données que le découpage n'a pas vues — c'est exactement le rôle du
+  journal de prévisions.
+- **Le banc d'essai peut être trompé par un réglage choisi après coup.** Si vous
+  essayez vingt variantes et gardez la meilleure, vous avez optimisé sur du
+  bruit. Le journal est là pour ça : il note une variante décidée à l'avance.
 - **Le backtest surestime** dès que les cotes historiques manquent ou ont été
   relevées après coup.
 - Un ROI positif sur moins d'une centaine de paris ne prouve rien : c'est le

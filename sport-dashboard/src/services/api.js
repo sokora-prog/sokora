@@ -51,6 +51,14 @@ export const sportApi = {
   calibration:    params           => api.get('/sport/calibration', { params }),
   riskSimulation: params           => api.get('/sport/risk-simulation', { params }),
 
+  // Laboratoire : quelle variante prédit le mieux, et où ?
+  modelComparison: params        => api.get('/sport/model-comparison', { params }),
+  edgeMap:        params           => api.get('/sport/edge-map', { params }),
+  forecasts:      params           => api.get('/sport/forecasts', { params }),
+  snapshotForecasts: d             => api.post('/sport/forecasts/snapshot', d),
+  forecastScoreboard: params       => api.get('/sport/forecasts/scoreboard', { params }),
+  deleteForecast: id               => api.delete(`/sport/forecasts/${id}`),
+
   // Paris et bankroll
   bets:           params           => api.get('/sport/bets', { params }),
   createBet:      d                => api.post('/sport/bets', d),

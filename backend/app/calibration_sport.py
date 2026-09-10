@@ -422,7 +422,14 @@ def clv_summary(clv_values: Sequence[float]) -> dict:
             "vous prenez systématiquement de meilleures cotes que la clôture, "
             "ce qui est le signe le plus fiable d'un avantage réel."
         )
-    elif average <= 0:
+    elif average == 0:
+        message = (
+            "CLV exactement nul : les cotes relevées n'ont pas bougé entre la "
+            "prise et la clôture. Rien à en conclure — l'indicateur ne devient "
+            "informatif que si les deux relevés sont faits à des moments "
+            "différents."
+        )
+    elif average < 0:
         message = (
             f"CLV moyen de {average * 100:.2f} % : vous pariez à des cotes moins "
             "bonnes que la clôture. Sur la durée, cela suffit à expliquer une "

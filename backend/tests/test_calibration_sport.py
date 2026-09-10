@@ -327,6 +327,14 @@ class TestSignificance(unittest.TestCase):
         self.assertLess(negative["mean_pct"], 0)
         self.assertIn("moins bonnes", negative["message"])
 
+        # Un CLV strictement nul n'est pas un CLV négatif : les cotes n'ont
+        # simplement pas bougé, et il n'y a rien à en conclure.
+        flat = cal.clv_summary([0.0] * 20)
+        self.assertEqual(flat["mean_pct"], 0.0)
+        self.assertFalse(flat["significant"])
+        self.assertIn("n'ont pas bougé", flat["message"])
+        self.assertNotIn("moins bonnes", flat["message"])
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  SIMULATION DE RISQUE

@@ -27,7 +27,7 @@ from . import calibration_sport as cal
 from .database import get_db
 from .models_sport import (
     BankrollTransaction, BankrollTxType, BetStatus, Competition, MatchStatus,
-    OddsQuote, SportBet, SportMatch, SportTeam,
+    OddsQuote, SportBet, SportForecast, SportMatch, SportTeam,
 )
 
 router = APIRouter(prefix="/sport", tags=["sport"])
@@ -773,6 +773,10 @@ def set_result(match_id: int, payload: ResultIn, db: Session = Depends(get_db)):
     _apply_match_fields(match, payload)
     match.status = MatchStatus.FINISHED
 
+    resolved_forecasts = _resolve_forecasts(
+        db, match, payload.home_goals, payload.away_goals
+    )
+
     settled = []
     if payload.settle_bets:
         for bet in match.bets:
@@ -790,7 +794,11 @@ def set_result(match_id: int, payload: ResultIn, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(match)
-    return {"match": _match_out(match), "settled_bets": settled}
+    return {
+        "match": _match_out(match),
+        "settled_bets": settled,
+        "resolved_forecasts": resolved_forecasts,
+    }
 
 
 def _extract_row_odds(
@@ -1609,6 +1617,356 @@ def edge_map(
     return result
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  JOURNAL DE PRÉVISIONS — LA MESURE QUI NE PEUT PAS MENTIR
+# ═══════════════════════════════════════════════════════════════════════════
+
+class SnapshotIn(BaseModel):
+    """Gel des prévisions du modèle sur les matchs à venir."""
+    competition_id: Optional[int] = None
+    markets: List[str] = ["1X2", "OU_2.5"]
+    signal: str = "goals"
+    market_weight: float = 0.0   # 0 = avis du modèle seul, ce qui est l'objet du test
+    max_matches: int = 100
+
+
+@router.post("/forecasts/snapshot", status_code=201)
+def snapshot_forecasts(payload: SnapshotIn, db: Session = Depends(get_db)):
+    """Fige les prévisions du modèle sur les matchs encore à jouer.
+
+    La calibration rejoue l'histoire, mais les réglages du modèle ont été
+    choisis en connaissant ces données : son verdict est donc partiellement
+    acquis d'avance. Une prévision gelée avant le coup d'envoi, elle, ne peut
+    pas être ajustée après coup — c'est la seule preuve qui vaille.
+
+    L'appel est rejouable : une prévision déjà enregistrée n'est jamais
+    réécrite, même si le modèle a changé d'avis entre-temps.
+    """
+    if payload.signal.lower() not in an.SIGNAL_VARIANTS:
+        raise HTTPException(400, f"Variante inconnue : {payload.signal}")
+
+    now = datetime.now(timezone.utc)
+    query = db.query(SportMatch).filter(SportMatch.status == MatchStatus.SCHEDULED)
+    if payload.competition_id:
+        query = query.filter(SportMatch.competition_id == payload.competition_id)
+    matches = query.order_by(SportMatch.kickoff).limit(payload.max_matches).all()
+
+    existing = {
+        (row.match_id, row.market, row.selection)
+        for row in db.query(
+            SportForecast.match_id, SportForecast.market, SportForecast.selection
+        ).all()
+    }
+
+    history_cache: Dict[int, List[an.MatchRecord]] = {}
+    created = 0
+    skipped_no_odds = skipped_started = skipped_existing = 0
+    covered_matches = set()
+
+    for match in matches:
+        kickoff = match.kickoff
+        if kickoff is not None:
+            if kickoff.tzinfo is None:
+                kickoff = kickoff.replace(tzinfo=timezone.utc)
+            if kickoff <= now:
+                # Un match déjà commencé ne peut plus fonder une prévision honnête.
+                skipped_started += 1
+                continue
+
+        quotes = _quotes_payload(match)
+        if not quotes:
+            skipped_no_odds += 1
+            continue
+
+        if match.competition_id not in history_cache:
+            history_cache[match.competition_id] = _history(db, match.competition_id)
+        history = history_cache[match.competition_id]
+
+        strengths, baseline = an.team_strengths(
+            history, reference=kickoff, signal=payload.signal
+        )
+        lam_h, lam_a = an.expected_goals(
+            strengths.get(match.home_team_id), strengths.get(match.away_team_id),
+            baseline, match.home_boost or 1.0, match.away_boost or 1.0,
+        )
+        markets = an.market_probabilities(
+            an.score_grid(lam_h, lam_a),
+            handicap_lines=an.handicap_lines_from_quotes(quotes),
+        )
+        value = an.find_value_bets(
+            markets, quotes, market_weight=payload.market_weight, edge_haircut=0.0
+        )
+        by_selection = {(v["market"], v["selection"]): v for v in value}
+
+        for market_key in payload.markets:
+            market_key = market_key.strip().upper()
+            model = markets.get(market_key)
+            if not model:
+                continue
+            reference_line = _market_quotes(match, market_key)
+            for selection, probability in model.items():
+                if selection == "PUSH":
+                    continue
+                key = (match.id, market_key, selection)
+                if key in existing:
+                    skipped_existing += 1
+                    continue
+                quote = by_selection.get((market_key, selection))
+                db.add(SportForecast(
+                    match_id=match.id,
+                    market=market_key,
+                    selection=selection,
+                    model_probability=round(probability, 6),
+                    market_probability=(
+                        quote["market_probability"] if quote else None
+                    ),
+                    best_odds=quote["odds"] if quote else None,
+                    reference_odds=reference_line.get(selection),
+                    signal=payload.signal,
+                    market_weight=payload.market_weight,
+                    kickoff=match.kickoff,
+                ))
+                existing.add(key)
+                created += 1
+                covered_matches.add(match.id)
+
+    db.commit()
+    return {
+        "created": created,
+        "matches_covered": len(covered_matches),
+        "skipped": {
+            "already_frozen": skipped_existing,
+            "no_odds": skipped_no_odds,
+            "already_started": skipped_started,
+        },
+        "signal": payload.signal,
+        "markets": payload.markets,
+        "note": (
+            "Ces prévisions sont désormais figées. Elles seront notées "
+            "automatiquement à la saisie des scores, et le tableau de bord du "
+            "journal dira, sans complaisance possible, si le modèle bat le marché."
+        ),
+    }
+
+
+def _resolve_forecasts(db: Session, match: SportMatch, home_goals: int, away_goals: int) -> int:
+    """Note les prévisions gelées d'un match dont le score vient d'être saisi."""
+    resolved = 0
+    forecasts = db.query(SportForecast).filter(
+        SportForecast.match_id == match.id, SportForecast.outcome.is_(None)
+    ).all()
+    closing = {
+        market: _market_quotes(match, market)
+        for market in {f.market for f in forecasts}
+    }
+    for forecast in forecasts:
+        verdict = an.settle_selection(
+            forecast.market, forecast.selection, home_goals, away_goals
+        )
+        if verdict is None:
+            continue
+        # HALF_WON / HALF_LOST n'ont pas de sens pour une prévision probabiliste :
+        # on ne note que ce qui est franchement arrivé ou non.
+        forecast.outcome = (
+            "WON" if verdict in ("WON", "HALF_WON")
+            else "LOST" if verdict in ("LOST", "HALF_LOST")
+            else "VOID"
+        )
+        forecast.closing_odds = closing.get(forecast.market, {}).get(forecast.selection)
+        forecast.resolved_at = datetime.now(timezone.utc)
+        resolved += 1
+    return resolved
+
+
+def _forecast_scoreboard_records(
+    rows: Sequence[SportForecast],
+    names: Dict[int, str],
+) -> List[cal.ForecastRecord]:
+    """Regroupe les lignes du journal en prévisions complètes et notées."""
+    grouped: Dict[Tuple[int, str], List[SportForecast]] = {}
+    for row in rows:
+        if row.outcome is None:
+            continue
+        grouped.setdefault((row.match_id, row.market), []).append(row)
+
+    records: List[cal.ForecastRecord] = []
+    for (match_id, market), group in grouped.items():
+        winners = [row for row in group if row.outcome == "WON"]
+        if len(winners) != 1 or any(row.outcome == "VOID" for row in group):
+            # Marché remboursé ou incomplet : inexploitable pour un score.
+            continue
+        model = {row.selection: row.model_probability for row in group}
+        total = sum(model.values())
+        if total <= 0:
+            continue
+        model = {k: v / total for k, v in model.items()}
+
+        market_probs = {
+            row.selection: row.market_probability for row in group
+            if row.market_probability is not None
+        }
+        if len(market_probs) != len(group):
+            continue
+        market_total = sum(market_probs.values())
+        if market_total <= 0:
+            continue
+        market_probs = {k: v / market_total for k, v in market_probs.items()}
+
+        first = group[0]
+        records.append(cal.ForecastRecord(
+            market_key=market,
+            model=model,
+            market=market_probs,
+            winner=winners[0].selection,
+            odds={row.selection: row.best_odds for row in group if row.best_odds},
+            kickoff=first.kickoff,
+            competition=first.match.competition_id if first.match else None,
+            label=(
+                f"{names.get(first.match.home_team_id)} — "
+                f"{names.get(first.match.away_team_id)}"
+                if first.match else ""
+            ),
+        ))
+    return records
+
+
+@router.get("/forecasts")
+def list_forecasts(
+    competition_id: Optional[int] = None,
+    market: Optional[str] = None,
+    pending_only: bool = False,
+    limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+):
+    """Contenu du journal, de la prévision la plus récente à la plus ancienne."""
+    query = db.query(SportForecast)
+    if market:
+        query = query.filter(SportForecast.market == market.strip().upper())
+    if pending_only:
+        query = query.filter(SportForecast.outcome.is_(None))
+    if competition_id:
+        query = query.join(SportMatch).filter(
+            SportMatch.competition_id == competition_id
+        )
+    rows = query.order_by(desc(SportForecast.kickoff), desc(SportForecast.id)).limit(limit).all()
+    names = _team_names(db)
+    return [
+        {
+            "id": row.id,
+            "match_id": row.match_id,
+            "match": (
+                f"{names.get(row.match.home_team_id)} — {names.get(row.match.away_team_id)}"
+                if row.match else None
+            ),
+            "kickoff": row.kickoff.isoformat() if row.kickoff else None,
+            "market": row.market,
+            "selection": row.selection,
+            "model_probability": row.model_probability,
+            "market_probability": row.market_probability,
+            "best_odds": row.best_odds,
+            "reference_odds": row.reference_odds,
+            "closing_odds": row.closing_odds,
+            "signal": row.signal,
+            "outcome": row.outcome,
+            "frozen_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+
+
+@router.get("/forecasts/scoreboard")
+def forecast_scoreboard(
+    competition_id: Optional[int] = None,
+    market: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Bilan du journal : le modèle bat-il le marché **en conditions réelles** ?
+
+    Contrairement à la calibration, aucune de ces prévisions n'a pu bénéficier
+    d'un réglage choisi après coup. Le verdict est donc plus lent à venir — il
+    faut attendre que les matchs se jouent — mais il ne souffre aucune objection.
+    """
+    query = db.query(SportForecast)
+    if market:
+        query = query.filter(SportForecast.market == market.strip().upper())
+    if competition_id:
+        query = query.join(SportMatch).filter(
+            SportMatch.competition_id == competition_id
+        )
+    rows = query.all()
+    names = _team_names(db)
+    records = _forecast_scoreboard_records(rows, names)
+    report = cal.calibration_report(records)
+
+    pending = [row for row in rows if row.outcome is None]
+    resolved = [row for row in rows if row.outcome is not None]
+    clv_values = [
+        (row.closing_odds / row.best_odds - 1.0)
+        for row in resolved
+        if row.closing_odds and row.best_odds and row.best_odds > 1.0
+    ]
+
+    campaigns: Dict[str, int] = {}
+    for row in rows:
+        campaigns[row.signal or "goals"] = campaigns.get(row.signal or "goals", 0) + 1
+
+    return {
+        "frozen_total": len(rows),
+        "resolved": len(resolved),
+        "pending": len(pending),
+        "scored_matches": report["sample"],
+        "report": {
+            k: v for k, v in report.items()
+            if k not in ("reliability_market",)
+        },
+        "clv": cal.clv_summary(clv_values),
+        "by_signal": [
+            {"signal": signal, "forecasts": count}
+            for signal, count in sorted(campaigns.items())
+        ],
+        "next_kickoffs": [
+            {
+                "match": (
+                    f"{names.get(row.match.home_team_id)} — "
+                    f"{names.get(row.match.away_team_id)}" if row.match else None
+                ),
+                "kickoff": row.kickoff.isoformat() if row.kickoff else None,
+                "market": row.market,
+            }
+            for row in sorted(
+                {row.match_id: row for row in pending}.values(),
+                key=lambda r: r.kickoff or datetime.max.replace(tzinfo=timezone.utc),
+            )[:10]
+        ],
+        "note": (
+            "Le journal ne se remplit qu'avec le temps : chaque prévision doit "
+            "attendre que le match se joue. C'est le prix d'une mesure que rien "
+            "ne permet d'embellir après coup."
+        ),
+    }
+
+
+@router.delete("/forecasts/{forecast_id}")
+def delete_forecast(forecast_id: int, db: Session = Depends(get_db)):
+    """Retire une prévision du journal.
+
+    Volontairement possible — il faut pouvoir corriger une campagne lancée par
+    erreur — mais à manier avec précaution : supprimer les prévisions ratées
+    reviendrait à se mentir, ce que tout le reste du module cherche à empêcher.
+    """
+    forecast = db.get(SportForecast, forecast_id)
+    if not forecast:
+        raise HTTPException(404, "Prévision introuvable")
+    db.delete(forecast)
+    db.commit()
+    return {
+        "deleted": True,
+        "warning": (
+            "Une prévision supprimée après le match fausse le bilan du journal."
+        ),
+    }
+
+
 @router.get("/risk-simulation")
 def risk_simulation(
     n_bets: int = Query(500, ge=10, le=5000),
@@ -1770,6 +2128,8 @@ def _scan_value_bets(
     market_weight: float = 0.35,
     edge_haircut: float = an.DEFAULT_EDGE_HAIRCUT,
     limit: int = 30,
+    only_proven: bool = False,
+    signal: str = "goals",
 ) -> dict:
     """Balaye les matchs à venir disposant de cotes et remonte les sélections
     dont l'edge dépasse le seuil, triées par valeur décroissante.
@@ -1786,6 +2146,37 @@ def _scan_value_bets(
     names = _team_names(db)
     history_cache: Dict[int, List[an.MatchRecord]] = {}
     opportunities: List[dict] = []
+
+    # Filtrage par poche démontrée : on ne garde que les couples
+    # (compétition, marché) où la carte des avantages établit que le modèle bat
+    # réellement la cote de clôture. C'est le seul usage défendable du scan.
+    proven_markets: Optional[set] = None
+    proven_competitions: Optional[set] = None
+    proven_summary: Optional[dict] = None
+    if only_proven:
+        competitions = {c.id: c.name for c in db.query(Competition).all()}
+        pocket_records: List[cal.ForecastRecord] = []
+        for pocket_market in ("1X2", "OU_2.5", "BTTS"):
+            found, _ = _forecast_records(
+                db, competition_id=competition_id, market_key=pocket_market,
+                min_history=30, limit=1200, signal=signal,
+            )
+            pocket_records.extend(found)
+        pockets = cal.edge_map(pocket_records, competitions)
+        proven_markets = {
+            row["segment"] for row in pockets["segments"]["par_marche"]
+            if row["beats_market"]
+        }
+        proven_competitions = {
+            row["segment"] for row in pockets["segments"]["par_competition"]
+            if row["beats_market"]
+        }
+        proven_summary = {
+            "markets": sorted(proven_markets),
+            "competitions": sorted(proven_competitions),
+            "sample": pockets["sample"],
+            "message": pockets["message"],
+        }
 
     for match in matches:
         quotes = _quotes_payload(match)
@@ -1816,6 +2207,15 @@ def _scan_value_bets(
         for bet in found:
             if not bet["is_value"]:
                 continue
+            if only_proven:
+                competition_name = (
+                    match.competition.name if match.competition else None
+                )
+                if (
+                    bet["market"] not in (proven_markets or set())
+                    or competition_name not in (proven_competitions or set())
+                ):
+                    continue
             opportunities.append({
                 **bet,
                 "match_id": match.id,
@@ -1834,6 +2234,24 @@ def _scan_value_bets(
         "matches_scanned": len(matches),
         "count": len(opportunities),
         "opportunities": opportunities[:limit],
+        "only_proven": only_proven,
+        "proven_pockets": proven_summary,
+        "filter_note": (
+            (
+                "Filtre actif : seules les poches où le modèle bat réellement la "
+                "cote de clôture sont retenues."
+                + (
+                    " Aucune ne remplit cette condition pour l'instant, d'où une "
+                    "liste vide — c'est le résultat attendu tant que rien n'est "
+                    "démontré."
+                    if not opportunities else ""
+                )
+            )
+            if only_proven else
+            "Filtre inactif : ces opportunités reposent sur un modèle dont "
+            "l'avantage n'est pas établi. Activez « poches démontrées » pour ne "
+            "voir que ce qui est étayé."
+        ),
     }
 
 
@@ -1845,13 +2263,19 @@ def value_bets(
     market_weight: float = Query(0.35, ge=0, le=1),
     edge_haircut: float = Query(an.DEFAULT_EDGE_HAIRCUT, ge=0, le=0.2),
     limit: int = Query(30, ge=1, le=200),
+    only_proven: bool = Query(
+        False, description="Ne garder que les poches où le modèle bat le marché"),
+    signal: str = Query("goals"),
     db: Session = Depends(get_db),
 ):
     """Toutes les opportunités de valeur détectées sur les matchs à venir."""
+    if signal.lower() not in an.SIGNAL_VARIANTS:
+        raise HTTPException(400, f"Variante inconnue : {signal}")
     return _scan_value_bets(
         db, competition_id=competition_id, min_edge=min_edge,
         kelly_fraction=kelly_fraction, market_weight=market_weight,
-        edge_haircut=edge_haircut, limit=limit,
+        edge_haircut=edge_haircut, limit=limit, only_proven=only_proven,
+        signal=signal,
     )
 
 

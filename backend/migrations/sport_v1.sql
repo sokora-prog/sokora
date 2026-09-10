@@ -110,3 +110,30 @@ CREATE TABLE IF NOT EXISTS sport_bankroll_transactions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS ix_sport_bankroll_created_at ON sport_bankroll_transactions (created_at);
+
+-- ── Journal de prévisions gelées (v1.1) ────────────────────────────────────
+-- Une prévision enregistrée avant le coup d'envoi ne peut plus être modifiée :
+-- c'est ce qui la rend probante, contrairement à un rejeu rétrospectif dont les
+-- réglages ont été choisis en connaissant les données.
+
+CREATE TABLE IF NOT EXISTS sport_forecasts (
+  id                 SERIAL PRIMARY KEY,
+  match_id           INTEGER NOT NULL REFERENCES sport_matches(id) ON DELETE CASCADE,
+  market             VARCHAR(40) NOT NULL,
+  selection          VARCHAR(40) NOT NULL,
+  model_probability  DOUBLE PRECISION NOT NULL,
+  market_probability DOUBLE PRECISION,
+  best_odds          DOUBLE PRECISION,
+  reference_odds     DOUBLE PRECISION,
+  signal             VARCHAR(20) DEFAULT 'goals',
+  market_weight      DOUBLE PRECISION,
+  kickoff            TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  outcome            VARCHAR(10),
+  closing_odds       DOUBLE PRECISION,
+  resolved_at        TIMESTAMPTZ,
+  CONSTRAINT uq_sport_forecast UNIQUE (match_id, market, selection)
+);
+CREATE INDEX IF NOT EXISTS ix_sport_forecasts_kickoff    ON sport_forecasts (kickoff);
+CREATE INDEX IF NOT EXISTS ix_sport_forecasts_created_at ON sport_forecasts (created_at);
+CREATE INDEX IF NOT EXISTS ix_sport_forecast_market      ON sport_forecasts (market, outcome);

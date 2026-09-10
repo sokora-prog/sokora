@@ -7,6 +7,7 @@ import BetTracker from './components/BetTracker.jsx';
 import DataManager from './components/DataManager.jsx';
 import Backtest from './components/Backtest.jsx';
 import Realism from './components/Realism.jsx';
+import Laboratory from './components/Laboratory.jsx';
 import { sportApi, errorMessage } from './services/api.js';
 
 const TABS = [
@@ -16,6 +17,7 @@ const TABS = [
   ['league', 'Championnats'],
   ['bets', 'Paris & bankroll'],
   ['realism', 'Réalisme'],
+  ['lab', 'Laboratoire'],
   ['backtest', 'Backtest'],
   ['data', 'Données'],
 ];
@@ -109,6 +111,7 @@ export default function App() {
         {tab === 'league' && <LeagueTable competitions={competitions} />}
         {tab === 'bets' && <BetTracker onChanged={loadReferences} />}
         {tab === 'realism' && <Realism competitions={competitions} />}
+        {tab === 'lab' && <Laboratory competitions={competitions} />}
         {tab === 'backtest' && <Backtest competitions={competitions} />}
         {tab === 'data' && (
           <DataManager competitions={competitions} teams={teams} onChanged={loadReferences} />

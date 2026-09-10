@@ -113,7 +113,10 @@ a  { color: var(--series-1); }
   display: grid; place-items: center; font-size: 13px; font-weight: 700;
 }
 .brand small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; }
-.topbar-spacer { flex: 1; }
+.topbar-spacer { flex: 1 1 0; min-width: 0; }
+/* Avec neuf onglets, la barre passe à la ligne : le sélecteur de thème doit
+   rester collé à droite plutôt que d'ouvrir la ligne suivante. */
+.topbar > .field:last-child { margin-left: auto; }
 
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
 .tab {
