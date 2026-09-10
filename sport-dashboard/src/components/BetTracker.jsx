@@ -316,7 +316,7 @@ export default function BetTracker({ onChanged }) {
                   <tr>
                     <td>Yield</td>
                     <td className="num"><strong>{nf(perf.yield_pct, 2)} %</strong></td>
-                    <td className="muted small">
+                    <td className="muted small wrap">
                       Profit rapporté au total misé. Au-delà de 5 % sur plusieurs
                       centaines de paris, l'avantage est probablement réel.
                     </td>
@@ -324,7 +324,7 @@ export default function BetTracker({ onChanged }) {
                   <tr>
                     <td>Repli maximal</td>
                     <td className="num"><strong>{nf(perf.max_drawdown_pct, 1)} %</strong></td>
-                    <td className="muted small">
+                    <td className="muted small wrap">
                       Pire recul depuis un sommet. Il dicte la taille de mise
                       supportable psychologiquement.
                     </td>
@@ -332,7 +332,7 @@ export default function BetTracker({ onChanged }) {
                   <tr>
                     <td>Série perdante la plus longue</td>
                     <td className="num"><strong>{perf.worst_losing_streak}</strong></td>
-                    <td className="muted small">
+                    <td className="muted small wrap">
                       Normal même avec un avantage : à cote 3,00, dix pertes
                       d'affilée arrivent régulièrement.
                     </td>
@@ -342,7 +342,7 @@ export default function BetTracker({ onChanged }) {
                     <td className="num">
                       <strong>{perf.clv_avg_pct === null ? '—' : `${nf(perf.clv_avg_pct, 2)} %`}</strong>
                     </td>
-                    <td className="muted small">
+                    <td className="muted small wrap">
                       Écart entre la cote prise et la cote de clôture. Positif
                       durablement = avantage réel, indépendamment de la chance.
                     </td>
@@ -350,7 +350,7 @@ export default function BetTracker({ onChanged }) {
                   <tr>
                     <td>Paris en cours</td>
                     <td className="num"><strong>{perf.bets_pending}</strong></td>
-                    <td className="muted small">
+                    <td className="muted small wrap">
                       {money(perf.pending_stake)} encore engagés, non comptés dans le ROI.
                     </td>
                   </tr>

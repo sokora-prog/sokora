@@ -6,7 +6,7 @@ import {
   statusTone,
 } from '../lib/format.js';
 
-export default function Dashboard({ onOpenMatch, onSeeded }) {
+export default function Dashboard({ onOpenMatch, onSeeded, onOpenRealism }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -35,8 +35,10 @@ export default function Dashboard({ onOpenMatch, onSeeded }) {
   if (error) return <div className="notice error">Impossible de charger le tableau de bord : {error}</div>;
   if (!data) return <div className="empty">Chargement…</div>;
 
-  const { bankroll, performance, counts } = data;
+  const { bankroll, performance, counts, realism } = data;
   const hasData = counts.matches > 0;
+  const stance = realism?.summary?.stance;
+  const followMarket = stance === 'SUIVRE LE MARCHÉ';
 
   return (
     <div className="stack">
@@ -48,6 +50,22 @@ export default function Dashboard({ onOpenMatch, onSeeded }) {
             <button className="primary" onClick={seed} disabled={busy}>
               {busy ? 'Génération…' : 'Générer un jeu de démonstration'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {realism && hasData && (
+        <div className={`notice${followMarket ? '' : ' ok'}`}>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <strong>{realism.summary.headline}</strong> — {realism.calibration.message}
+            </div>
+            <div className="btn-row">
+              <span className={`badge ${followMarket ? 'critical' : 'good'}`}>{stance}</span>
+              <button className="ghost" onClick={() => onOpenRealism?.()}>
+                Voir le détail
+              </button>
+            </div>
           </div>
         </div>
       )}

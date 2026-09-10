@@ -15,7 +15,7 @@ ne fait que traduire base de données ↔ moteur d'analyse.
 import csv
 import io
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,6 +23,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from . import analytics_sport as an
+from . import calibration_sport as cal
 from .database import get_db
 from .models_sport import (
     BankrollTransaction, BankrollTxType, BetStatus, Competition, MatchStatus,
@@ -34,6 +35,22 @@ router = APIRouter(prefix="/sport", tags=["sport"])
 #: Seuil de valeur en dessous duquel on ne parie pas. 3 % d'edge est un
 #: minimum réaliste : en dessous, l'erreur du modèle dépasse l'avantage.
 DEFAULT_MIN_EDGE = 0.03
+
+DEMO_COMPETITION_NAME = "Championnat Démo"
+
+#: Mise en garde affichée dès qu'une mesure porte sur le jeu de démonstration.
+#: Ce monde synthétique est engendré par le processus de Poisson que le modèle
+#: postule : le modèle y est donc *bien spécifié*, ce qui n'arrive jamais dans
+#: la réalité. Ses résultats de calibration y sont flatteurs et ne se
+#: transposent pas.
+DEMO_CAVEAT = (
+    "Ces mesures portent sur le championnat de démonstration, engendré par le "
+    "même processus de Poisson que le modèle suppose. Le modèle y est donc "
+    "artificiellement bien placé, et le « marché » simulé ne contient aucune "
+    "information que le modèle ignore. Sur de vraies données, la cote de "
+    "clôture intègre les compositions, les absences et l'argent des "
+    "professionnels : elle est bien plus difficile à battre."
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -133,6 +150,7 @@ class PredictIn(BaseModel):
     min_edge: float = DEFAULT_MIN_EDGE
     kelly_fraction: float = 0.25
     market_weight: float = 0.35
+    edge_haircut: float = an.DEFAULT_EDGE_HAIRCUT
 
 
 class BetIn(BaseModel):
@@ -882,6 +900,313 @@ def delete_odds(quote_id: int, db: Session = Depends(get_db)):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  CALIBRATION — LE MODÈLE BAT-IL LE MARCHÉ ?
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _market_quotes(match: SportMatch, market_key: str) -> Dict[str, float]:
+    """Cotes d'un marché pour un match, en privilégiant la cote de clôture."""
+    best: Dict[str, dict] = {}
+    for quote in match.odds_quotes:
+        if quote.market != market_key or not quote.odds or quote.odds <= 1.0:
+            continue
+        current = best.get(quote.selection)
+        # La cote de clôture prime ; sinon on garde la plus récente.
+        if (
+            current is None
+            or (quote.is_closing and not current["is_closing"])
+            or (
+                quote.is_closing == current["is_closing"]
+                and (quote.captured_at or datetime.min.replace(tzinfo=timezone.utc))
+                > (current["captured_at"] or datetime.min.replace(tzinfo=timezone.utc))
+            )
+        ):
+            best[quote.selection] = {
+                "odds": quote.odds,
+                "is_closing": bool(quote.is_closing),
+                "captured_at": quote.captured_at,
+            }
+    return {selection: row["odds"] for selection, row in best.items()}
+
+
+def _forecast_records(
+    db: Session,
+    competition_id: Optional[int] = None,
+    market_key: str = "1X2",
+    min_history: int = 30,
+    limit: int = 600,
+    devig: str = "proportional",
+) -> Tuple[List[cal.ForecastRecord], dict]:
+    """Rejoue l'historique pour confronter le modèle au marché, match par match.
+
+    Pour chaque journée, les forces d'équipe sont recalculées à partir des seuls
+    matchs antérieurs : aucune information du futur ne fuit dans la prévision.
+    Seuls les matchs disposant des cotes complètes du marché sont évalués.
+    """
+    query = db.query(SportMatch).filter(
+        SportMatch.status == MatchStatus.FINISHED,
+        SportMatch.kickoff.isnot(None),
+    )
+    if competition_id:
+        query = query.filter(SportMatch.competition_id == competition_id)
+    matches = query.order_by(SportMatch.kickoff).all()
+
+    names = _team_names(db)
+    by_competition: Dict[int, List[SportMatch]] = {}
+    for match in matches:
+        by_competition.setdefault(match.competition_id, []).append(match)
+
+    records: List[cal.ForecastRecord] = []
+    stats = {
+        "matches": len(matches), "evaluated": 0, "without_odds": 0,
+        "voided": 0, "demo_data": False,
+    }
+
+    for comp_id, comp_matches in by_competition.items():
+        played: List[an.MatchRecord] = []
+        pending_day: List[SportMatch] = []
+        current_day = None
+        strengths = baseline = None
+
+        def flush_day():
+            """Évalue les matchs d'une même journée avec les forces d'avant-match."""
+            nonlocal strengths, baseline
+            for match in pending_day:
+                quotes = _market_quotes(match, market_key)
+                if len(quotes) < 2:
+                    stats["without_odds"] += 1
+                    continue
+                # Sélection réellement gagnante, déduite du score.
+                winner = None
+                voided = False
+                for selection in quotes:
+                    verdict = an.settle_selection(
+                        market_key, selection, match.home_goals, match.away_goals
+                    )
+                    if verdict == "VOID":
+                        voided = True
+                    elif verdict == "WON":
+                        winner = selection
+                if voided or winner is None:
+                    stats["voided"] += 1
+                    continue
+
+                lam_h, lam_a = an.expected_goals(
+                    strengths.get(match.home_team_id),
+                    strengths.get(match.away_team_id),
+                    baseline,
+                )
+                model_markets = an.market_probabilities(an.score_grid(lam_h, lam_a))
+                model = model_markets.get(market_key)
+                if not model or any(sel not in model for sel in quotes):
+                    stats["without_odds"] += 1
+                    continue
+
+                selections = list(quotes)
+                model_probs = {sel: model[sel] for sel in selections}
+                total = sum(model_probs.values())
+                if total <= 0:
+                    continue
+                model_probs = {sel: p / total for sel, p in model_probs.items()}
+                # Dévigorisation neutre par défaut : une méthode plus élaborée
+                # déplacerait la barre à franchir, donc fausserait la comparaison.
+                market_probs = an.remove_margin(quotes, devig)
+
+                records.append(cal.ForecastRecord(
+                    market_key=market_key,
+                    model=model_probs,
+                    market=market_probs,
+                    winner=winner,
+                    odds=dict(quotes),
+                    kickoff=match.kickoff,
+                    label=(
+                        f"{names.get(match.home_team_id)} — {names.get(match.away_team_id)}"
+                    ),
+                ))
+                stats["evaluated"] += 1
+                if match.competition and match.competition.name == DEMO_COMPETITION_NAME:
+                    stats["demo_data"] = True
+
+        for match in comp_matches:
+            day = match.kickoff.date() if match.kickoff else None
+            if day != current_day:
+                if pending_day and len(played) >= min_history:
+                    strengths, baseline = an.team_strengths(
+                        played, reference=pending_day[0].kickoff
+                    )
+                    flush_day()
+                for done in pending_day:
+                    played.append(an.MatchRecord(
+                        home=done.home_team_id, away=done.away_team_id,
+                        home_goals=done.home_goals, away_goals=done.away_goals,
+                        kickoff=done.kickoff, competition=done.competition_id,
+                    ))
+                pending_day = []
+                current_day = day
+            pending_day.append(match)
+            if len(records) >= limit:
+                break
+
+        if pending_day and len(played) >= min_history and len(records) < limit:
+            strengths, baseline = an.team_strengths(played, reference=pending_day[0].kickoff)
+            flush_day()
+
+    return records, stats
+
+
+def _settled_returns(db: Session) -> Tuple[List[float], List[float], List[an.BetRecord]]:
+    """Rendements unitaires et CLV des paris réglés, pour les tests statistiques."""
+    bets = [_bet_record(b) for b in db.query(SportBet).all()]
+    returns = [
+        b.net_profit() / b.stake
+        for b in bets
+        if b.is_resolved_stake() and b.stake > 0
+    ]
+    clv = [
+        (b.closing_odds / b.odds - 1.0)
+        for b in bets
+        if b.is_settled() and b.closing_odds and b.odds and b.odds > 1.0
+    ]
+    return returns, clv, bets
+
+
+def _realism_block(db: Session, quick: bool = True) -> dict:
+    """Ce que les données prouvent réellement — utilisé par le tableau de bord."""
+    # Le balayage n'a de sens que si des matchs joués portent des cotes ; sans
+    # cela, inutile de recalculer les forces d'équipe journée par journée.
+    has_history_odds = (
+        db.query(OddsQuote.id)
+        .join(SportMatch, OddsQuote.match_id == SportMatch.id)
+        .filter(SportMatch.status == MatchStatus.FINISHED)
+        .first()
+        is not None
+    )
+    if has_history_odds:
+        records, stats = _forecast_records(db, min_history=30, limit=400 if quick else 1000)
+    else:
+        records, stats = [], {
+            "matches": 0, "evaluated": 0, "without_odds": 0,
+            "voided": 0, "demo_data": False,
+        }
+    calibration = cal.calibration_report(records)
+    returns, clv, _ = _settled_returns(db)
+    yield_test = cal.significance_test(returns)
+    clv_test = cal.clv_summary(clv)
+    summary = cal.realism_summary(calibration, yield_test, clv_test)
+    return {
+        "calibration": {
+            k: v for k, v in calibration.items()
+            if k not in ("reliability_model", "reliability_market")
+        },
+        "coverage": stats,
+        "demo_caveat": DEMO_CAVEAT if stats.get("demo_data") else None,
+        "yield_test": yield_test,
+        "clv": clv_test,
+        "summary": summary,
+    }
+
+
+@router.get("/calibration")
+def calibration(
+    competition_id: Optional[int] = None,
+    market: str = Query("1X2", description="Marché évalué (1X2, OU_2.5, BTTS…)"),
+    min_history: int = Query(30, ge=10, le=500),
+    limit: int = Query(600, ge=50, le=2000),
+    devig: str = Query("proportional", pattern="^(proportional|odds_ratio|power)$"),
+    db: Session = Depends(get_db),
+):
+    """Confronte le modèle à la cote de clôture, prévision par prévision.
+
+    C'est le test décisif de l'outil : si le modèle ne bat pas le marché sur un
+    échantillon suffisant, aucun « edge » qu'il affiche n'est exploitable, et
+    l'application doit le dire plutôt que de proposer des mises.
+    """
+    market_key = market.strip().upper()
+    records, stats = _forecast_records(
+        db, competition_id=competition_id, market_key=market_key,
+        min_history=min_history, limit=limit, devig=devig,
+    )
+    report = cal.calibration_report(records)
+
+    # Marchés disponibles, pour orienter l'utilisateur vers ceux qui ont des cotes.
+    available: Dict[str, int] = {}
+    quote_query = db.query(OddsQuote)
+    if competition_id:
+        quote_query = (
+            quote_query.join(SportMatch)
+            .filter(SportMatch.competition_id == competition_id)
+        )
+    for quote in quote_query.all():
+        available[quote.market] = available.get(quote.market, 0) + 1
+
+    returns, clv, _ = _settled_returns(db)
+    yield_test = cal.significance_test(returns)
+    clv_test = cal.clv_summary(clv)
+
+    average_odds = (
+        sum(sum(r.odds.values()) / len(r.odds) for r in records) / len(records)
+        if records else 2.0
+    )
+
+    return {
+        "market": market_key,
+        "coverage": stats,
+        "available_markets": [
+            {"market": k, "quotes": v} for k, v in sorted(available.items())
+        ],
+        "report": report,
+        "yield_test": yield_test,
+        "clv": clv_test,
+        "summary": cal.realism_summary(report, yield_test, clv_test),
+        "sample_size_required": {
+            "edge_2pct": cal.required_sample_size(0.02, average_odds),
+            "edge_5pct": cal.required_sample_size(0.05, average_odds),
+            "edge_10pct": cal.required_sample_size(0.10, average_odds),
+            "reference_odds": round(average_odds, 2),
+        },
+        "devig": devig,
+        "note": (
+            "Chaque prévision n'utilise que les matchs joués avant le coup d'envoi, "
+            "et la cote retenue est celle de clôture quand elle a été saisie. "
+            "Le score de Brier du marché est la barre à franchir : la battre est "
+            "rare, et c'est précisément ce qui distingue un avantage d'une illusion."
+        ),
+        "demo_caveat": DEMO_CAVEAT if stats.get("demo_data") else None,
+    }
+
+
+@router.get("/risk-simulation")
+def risk_simulation(
+    n_bets: int = Query(500, ge=10, le=5000),
+    odds: float = Query(2.0, gt=1.0, le=20.0),
+    true_edge: float = Query(0.02, ge=-0.20, le=0.30,
+                             description="Avantage réellement détenu — détermine les résultats"),
+    believed_edge: Optional[float] = Query(
+        None, ge=-0.20, le=0.50,
+        description="Avantage supposé — dimensionne les mises (défaut : identique au réel)"),
+    bankroll: Optional[float] = None,
+    staking: str = Query("kelly", pattern="^(kelly|flat)$"),
+    kelly_fraction: float = Query(0.25, gt=0, le=1),
+    flat_stake_pct: float = Query(0.01, gt=0, le=0.2),
+    n_paths: int = Query(2000, ge=200, le=10000),
+    db: Session = Depends(get_db),
+):
+    """Simule des milliers de trajectoires de la même stratégie.
+
+    Une seule saison ne prouve rien : c'est la dispersion des résultats
+    possibles qui dit à quoi s'attendre, et combien de capital il faut pour
+    encaisser les mauvais scénarios.
+    """
+    if bankroll is None:
+        bankroll = _current_bankroll(db)["balance"] or 1000.0
+    return cal.simulate_strategy(
+        n_bets=n_bets, odds=odds, true_edge=true_edge, believed_edge=believed_edge,
+        bankroll=max(1.0, bankroll), staking=staking,
+        kelly_fraction=kelly_fraction, flat_stake_pct=flat_stake_pct,
+        n_paths=n_paths,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  ANALYSE
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -893,6 +1218,8 @@ def match_analysis(
     kelly_fraction: float = Query(0.25, gt=0, le=1),
     market_weight: float = Query(0.35, ge=0, le=1,
                                  description="Poids du marché dans la probabilité retenue"),
+    edge_haircut: float = Query(an.DEFAULT_EDGE_HAIRCUT, ge=0, le=0.2,
+                                description="Décote appliquée aux edges estimés"),
     half_life_days: float = Query(an.DEFAULT_HALF_LIFE_DAYS, gt=0),
     form_window: int = Query(10, ge=1, le=50),
     exclude_future: bool = Query(
@@ -919,6 +1246,7 @@ def match_analysis(
         min_edge=min_edge,
         kelly_fraction=kelly_fraction,
         market_weight=market_weight,
+        edge_haircut=edge_haircut,
         home_boost=match.home_boost or 1.0,
         away_boost=match.away_boost or 1.0,
         form_window=form_window,
@@ -982,6 +1310,7 @@ def predict(payload: PredictIn, db: Session = Depends(get_db)):
         min_edge=payload.min_edge,
         kelly_fraction=payload.kelly_fraction,
         market_weight=payload.market_weight,
+        edge_haircut=payload.edge_haircut,
         home_boost=payload.home_boost,
         away_boost=payload.away_boost,
     )
@@ -1004,6 +1333,7 @@ def _scan_value_bets(
     min_edge: float = DEFAULT_MIN_EDGE,
     kelly_fraction: float = 0.25,
     market_weight: float = 0.35,
+    edge_haircut: float = an.DEFAULT_EDGE_HAIRCUT,
     limit: int = 30,
 ) -> dict:
     """Balaye les matchs à venir disposant de cotes et remonte les sélections
@@ -1043,6 +1373,7 @@ def _scan_value_bets(
         found = an.find_value_bets(
             markets, quotes, bankroll=bankroll, min_edge=min_edge,
             kelly_fraction=kelly_fraction, market_weight=market_weight,
+            edge_haircut=edge_haircut,
         )
         for bet in found:
             if not bet["is_value"]:
@@ -1061,6 +1392,7 @@ def _scan_value_bets(
     return {
         "bankroll": bankroll,
         "min_edge": min_edge,
+        "edge_haircut": edge_haircut,
         "matches_scanned": len(matches),
         "count": len(opportunities),
         "opportunities": opportunities[:limit],
@@ -1073,13 +1405,15 @@ def value_bets(
     min_edge: float = Query(DEFAULT_MIN_EDGE, ge=0, le=0.5),
     kelly_fraction: float = Query(0.25, gt=0, le=1),
     market_weight: float = Query(0.35, ge=0, le=1),
+    edge_haircut: float = Query(an.DEFAULT_EDGE_HAIRCUT, ge=0, le=0.2),
     limit: int = Query(30, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
     """Toutes les opportunités de valeur détectées sur les matchs à venir."""
     return _scan_value_bets(
         db, competition_id=competition_id, min_edge=min_edge,
-        kelly_fraction=kelly_fraction, market_weight=market_weight, limit=limit,
+        kelly_fraction=kelly_fraction, market_weight=market_weight,
+        edge_haircut=edge_haircut, limit=limit,
     )
 
 
@@ -1088,6 +1422,7 @@ def backtest(
     competition_id: int,
     min_edge: float = Query(DEFAULT_MIN_EDGE, ge=0, le=0.5),
     market_weight: float = Query(0.35, ge=0, le=1),
+    edge_haircut: float = Query(an.DEFAULT_EDGE_HAIRCUT, ge=0, le=0.2),
     flat_stake: float = Query(10.0, gt=0),
     min_history: int = Query(40, ge=10, le=500,
                              description="Matchs d'historique avant de commencer à parier"),
@@ -1128,7 +1463,8 @@ def backtest(
                 )
                 markets = an.market_probabilities(an.score_grid(lam_h, lam_a))
                 for pick in an.find_value_bets(
-                    markets, quotes, min_edge=min_edge, market_weight=market_weight
+                    markets, quotes, min_edge=min_edge, market_weight=market_weight,
+                    edge_haircut=edge_haircut,
                 ):
                     if not pick["is_value"]:
                         continue
@@ -1267,12 +1603,39 @@ def delete_bet(bet_id: int, db: Session = Depends(get_db)):
 
 @router.get("/performance")
 def performance(db: Session = Depends(get_db)):
-    """Bilan du parieur : ROI, yield, drawdown, CLV, détail par marché."""
-    bets = [_bet_record(b) for b in db.query(SportBet).all()]
+    """Bilan du parieur, assorti de ce que ces chiffres prouvent réellement.
+
+    Le ROI seul est trompeur sur petit échantillon : on l'accompagne donc d'un
+    test de significativité, de l'analyse du CLV et du nombre de paris qu'il
+    faudrait pour trancher.
+    """
+    returns, clv, bets = _settled_returns(db)
     bankroll = _current_bankroll(db)
+    stats = an.bet_performance(bets, starting_bankroll=bankroll["starting_capital"])
+
+    yield_test = cal.significance_test(returns)
+    clv_test = cal.clv_summary(clv)
+    reference_odds = stats["avg_odds"] or 2.0
+    observed_edge = max(0.01, stats["roi"]) if stats["roi"] > 0 else 0.02
+
     return {
         "bankroll": bankroll,
-        "performance": an.bet_performance(bets, starting_bankroll=bankroll["starting_capital"]),
+        "performance": stats,
+        "significance": {
+            "yield": yield_test,
+            "clv": clv_test,
+            "bets_needed_for_observed_edge": cal.required_sample_size(
+                observed_edge, reference_odds
+            ),
+            "bets_needed_for_2pct_edge": cal.required_sample_size(0.02, reference_odds),
+            "reference_odds": round(reference_odds, 2),
+            "note": (
+                "Le nombre de paris nécessaires est calculé pour détecter un "
+                "avantage de cette taille à 95 % de confiance. Il dépasse "
+                "presque toujours ce qu'un parieur individuel joue en une saison "
+                "— d'où l'importance du CLV, qui conclut bien plus vite."
+            ),
+        },
     }
 
 
@@ -1347,9 +1710,11 @@ def dashboard(db: Session = Depends(get_db)):
         .all()
     )
     top_value = _scan_value_bets(db, min_edge=DEFAULT_MIN_EDGE, limit=5)
+    realism = _realism_block(db)
 
     return {
         "bankroll": bankroll,
+        "realism": realism,
         "performance": {
             k: v for k, v in perf.items() if k not in ("bankroll_curve", "by_market")
         },
@@ -1385,7 +1750,7 @@ def seed_demo(
     immédiatement, sans saisie manuelle."""
     import random
 
-    DEMO_NAME = "Championnat Démo"
+    DEMO_NAME = DEMO_COMPETITION_NAME
     existing = db.query(Competition).filter(Competition.name == DEMO_NAME).first()
     if existing and not reset:
         raise HTTPException(
@@ -1431,6 +1796,7 @@ def seed_demo(
                 return k
             k += 1
 
+    played_matches: List[Tuple[SportMatch, float, float]] = []
     for round_index in range(matches_per_team):
         order = ids[:]
         rng.shuffle(order)
@@ -1439,7 +1805,7 @@ def seed_demo(
             h, a = order[i], order[i + 1]
             lam_h = 1.45 * quality[h] / quality[a]
             lam_a = 1.10 * quality[a] / quality[h]
-            db.add(SportMatch(
+            match = SportMatch(
                 competition_id=comp.id, home_team_id=h, away_team_id=a,
                 kickoff=kickoff, matchday=round_index + 1,
                 status=MatchStatus.FINISHED,
@@ -1448,7 +1814,29 @@ def seed_demo(
                 away_xg=round(lam_a + rng.uniform(-0.3, 0.3), 2),
                 home_shots=rng.randint(6, 20), away_shots=rng.randint(4, 17),
                 home_corners=rng.randint(2, 11), away_corners=rng.randint(1, 9),
-            ))
+            )
+            db.add(match)
+            played_matches.append((match, lam_h, lam_a))
+    db.flush()
+
+    # Cotes de clôture historiques, construites à partir des VRAIS paramètres de
+    # la simulation : le marché de démonstration est donc volontairement précis,
+    # comme l'est un marché liquide réel. C'est ce qui permet à l'onglet
+    # « Réalisme » de montrer honnêtement que le modèle, estimé sur un
+    # échantillon fini, ne le bat pas.
+    for match, lam_h, lam_a in played_matches:
+        true_markets = an.market_probabilities(an.score_grid(lam_h, lam_a))
+        for market in ("1X2", "OU_2.5"):
+            for selection, probability in true_markets[market].items():
+                if selection == "PUSH" or probability <= 0:
+                    continue
+                # Marge bookmaker d'environ 5 %, plus un léger bruit de cotation.
+                shown = an.clamp(probability * 1.05 * rng.uniform(0.98, 1.02), 0.01, 0.97)
+                db.add(OddsQuote(
+                    match_id=match.id, market=market, selection=selection,
+                    odds=round(1 / shown, 2), bookmaker="DemoBook", is_closing=True,
+                    captured_at=match.kickoff,
+                ))
     db.flush()
 
     # Matchs à venir + cotes bookmaker (marge ~6 %) légèrement décalées du
@@ -1498,7 +1886,9 @@ def seed_demo(
             SportMatch.status == MatchStatus.FINISHED).count(),
         "upcoming_matches": upcoming_ids,
         "message": (
-            "Jeu de démonstration créé. Consulter /sport/dashboard puis "
-            "/sport/matches/{id}/analysis sur un match à venir."
+            "Jeu de démonstration créé, cotes de clôture historiques comprises. "
+            "Consulter /sport/dashboard, /sport/matches/{id}/analysis, puis "
+            "/sport/calibration pour confronter le modèle au marché."
         ),
+        "caveat": DEMO_CAVEAT,
     }

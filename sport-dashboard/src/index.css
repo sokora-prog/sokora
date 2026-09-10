@@ -244,6 +244,8 @@ button.ghost { background: none; border-color: var(--border); }
 .small { font-size: 12px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .nowrap { white-space: nowrap; }
+/* Les cellules explicatives doivent se replier plutôt que déborder. */
+td.wrap, th.wrap { white-space: normal; min-width: 220px; }
 .notice {
   border: 1px solid var(--border); border-left: 3px solid var(--warning);
   background: var(--surface-2); border-radius: 8px; padding: 10px 12px;

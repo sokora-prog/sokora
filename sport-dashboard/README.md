@@ -25,6 +25,7 @@ echo "VITE_API_URL=http://localhost:8000" > .env.local
 | Valeur | balayage de tous les matchs à venir cotés, classés par edge |
 | Championnats | classement enrichi (PPG domicile/extérieur, over 2.5, BTTS) et fiche d'équipe |
 | Paris & bankroll | suivi des paris, règlement, mouvements de capital, lecture des indicateurs |
+| **Réalisme** | **le modèle bat-il la cote de clôture ? courbe de fiabilité, significativité, simulation de risque** |
 | Backtest | simulation de la stratégie sur l'historique, sans fuite d'information |
 | Données | import CSV, création de compétitions / matchs, saisie des cotes |
 

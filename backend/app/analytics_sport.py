@@ -63,6 +63,13 @@ LAMBDA_MIN, LAMBDA_MAX = 0.15, 5.0
 FALLBACK_HOME_GOALS = 1.50
 FALLBACK_AWAY_GOALS = 1.15
 
+#: Décote appliquée à tout edge estimé (« malédiction du vainqueur »).
+#: On retient la meilleure des ~30 sélections d'un match ; chacune porte une
+#: erreur d'estimation, et le maximum d'un ensemble d'estimations bruitées est
+#: biaisé vers le haut. Retirer 2 points d'edge est une correction prudente et
+#: volontairement grossière : mieux vaut rater une occasion que financer du bruit.
+DEFAULT_EDGE_HAIRCUT = 0.02
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  STRUCTURES D'ENTRÉE
@@ -1050,16 +1057,25 @@ def find_value_bets(
     kelly_cap: float = 0.05,
     market_weight: float = 0.35,
     devig_method: str = "odds_ratio",
+    edge_haircut: float = DEFAULT_EDGE_HAIRCUT,
 ) -> List[dict]:
     """Compare les probabilités du modèle aux cotes disponibles.
 
     ``quotes`` : [{"market": "1X2", "selection": "HOME", "odds": 2.10,
                    "bookmaker": "X"}]
 
-    Pour chaque marché complet, la marge du bookmaker est retirée afin d'obtenir
-    la probabilité « no-vig ». La probabilité retenue pour l'edge est un mélange
-    modèle/marché (``market_weight``), plus prudent que le modèle seul.
-    Retourne les sélections triées par edge décroissant.
+    Trois précautions, dans cet ordre :
+
+    1. la marge du bookmaker est retirée du marché complet → probabilité
+       « no-vig », c'est-à-dire l'avis réel du marché ;
+    2. la probabilité retenue mêle modèle et marché (``market_weight``) : sur un
+       marché liquide, le marché est le meilleur estimateur disponible ;
+    3. l'edge obtenu subit une **décote** (``edge_haircut``) qui compense le
+       biais de sélection : on ne garde que la meilleure sélection, or le
+       maximum d'estimations bruitées est systématiquement trop optimiste.
+
+    La mise de Kelly est calculée sur la probabilité *après* décote, jamais sur
+    l'estimation brute. Retourne les sélections triées par edge net décroissant.
     """
     by_market: Dict[str, Dict[str, dict]] = {}
     for q in quotes:
@@ -1090,10 +1106,14 @@ def find_value_bets(
                 continue
             p_market = novig.get(selection)
             p_used = blend_probabilities(p_model, p_market, market_weight)
-            ev = edge(p_used, quote["odds"])
-            if ev is None:
+            raw_edge = edge(p_used, quote["odds"])
+            if raw_edge is None:
                 continue
-            stake = kelly_stake(p_used, quote["odds"], bankroll, kelly_fraction, kelly_cap)
+            net_edge = raw_edge - max(0.0, edge_haircut)
+            # Probabilité ramenée à ce que l'edge net implique : c'est elle qui
+            # dimensionne la mise, jamais l'estimation brute.
+            p_staking = max(0.0, (1.0 + net_edge) / float(quote["odds"]))
+            stake = kelly_stake(p_staking, quote["odds"], bankroll, kelly_fraction, kelly_cap)
             results.append({
                 "market": market,
                 "selection": selection,
@@ -1103,11 +1123,14 @@ def find_value_bets(
                 "market_probability": round(p_market, 4) if p_market is not None else None,
                 "blended_probability": round(p_used, 4),
                 "fair_odds": round(fair_odds(p_used), 3) if p_used > 0 else None,
-                "edge": round(ev, 4),
-                "edge_pct": round(ev * 100, 2),
+                "edge_raw": round(raw_edge, 4),
+                "edge_raw_pct": round(raw_edge * 100, 2),
+                "haircut": round(max(0.0, edge_haircut), 4),
+                "edge": round(net_edge, 4),
+                "edge_pct": round(net_edge * 100, 2),
                 "bookmaker_margin": round(margin, 4) if margin is not None else None,
                 "kelly": stake,
-                "is_value": ev >= min_edge,
+                "is_value": net_edge >= min_edge,
             })
 
     results.sort(key=lambda r: r["edge"], reverse=True)
@@ -1140,9 +1163,11 @@ def build_verdict(
 
     best = next((v for v in value_bets if v["is_value"]), None)
     if best is None and value_bets:
+        haircut = value_bets[0].get("haircut") or 0.0
         warnings.append(
             f"Aucune sélection n'atteint le seuil de valeur de {min_edge * 100:.1f} % "
-            "— la meilleure décision est de ne pas parier."
+            f"après la décote de {haircut * 100:.1f} point(s) appliquée aux edges "
+            "estimés — la meilleure décision est de ne pas parier."
         )
 
     return {
@@ -1179,6 +1204,7 @@ def analyse_match(
     kelly_fraction: float = 0.25,
     kelly_cap: float = 0.05,
     market_weight: float = 0.35,
+    edge_haircut: float = DEFAULT_EDGE_HAIRCUT,
     home_boost: float = 1.0,
     away_boost: float = 1.0,
     form_window: int = 10,
@@ -1209,7 +1235,7 @@ def analyse_match(
     value_bets = find_value_bets(
         markets, quotes, bankroll=bankroll, min_edge=min_edge,
         kelly_fraction=kelly_fraction, kelly_cap=kelly_cap,
-        market_weight=market_weight,
+        market_weight=market_weight, edge_haircut=edge_haircut,
     )
 
     return {

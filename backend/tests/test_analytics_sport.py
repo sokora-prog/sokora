@@ -565,6 +565,69 @@ class TestValueDetection(unittest.TestCase):
         self.assertTrue(any("échantillon" in w.lower() for w in verdict["warnings"]))
 
 
+class TestEdgeHaircut(unittest.TestCase):
+    """La décote des edges : l'hypothèse réaliste appliquée au calcul de valeur."""
+
+    MODEL = {"1X2": {"HOME": 0.50, "DRAW": 0.28, "AWAY": 0.22}}
+    QUOTES = [
+        {"market": "1X2", "selection": "HOME", "odds": 2.60, "bookmaker": "A"},
+        {"market": "1X2", "selection": "DRAW", "odds": 3.50, "bookmaker": "A"},
+        {"market": "1X2", "selection": "AWAY", "odds": 4.20, "bookmaker": "A"},
+    ]
+
+    def test_haircut_is_applied_to_every_edge(self):
+        found = an.find_value_bets(self.MODEL, self.QUOTES, bankroll=1000)
+        for row in found:
+            self.assertAlmostEqual(
+                row["edge"], row["edge_raw"] - an.DEFAULT_EDGE_HAIRCUT, places=4
+            )
+            self.assertAlmostEqual(row["haircut"], an.DEFAULT_EDGE_HAIRCUT, places=6)
+
+    def test_haircut_can_be_disabled(self):
+        found = an.find_value_bets(self.MODEL, self.QUOTES, edge_haircut=0.0)
+        for row in found:
+            self.assertAlmostEqual(row["edge"], row["edge_raw"], places=6)
+
+    def test_haircut_shrinks_the_recommended_stake(self):
+        with_haircut = an.find_value_bets(self.MODEL, self.QUOTES, bankroll=1000)
+        without = an.find_value_bets(
+            self.MODEL, self.QUOTES, bankroll=1000, edge_haircut=0.0
+        )
+        best_with = next(r for r in with_haircut if r["selection"] == "HOME")
+        best_without = next(r for r in without if r["selection"] == "HOME")
+        self.assertLess(best_with["kelly"]["stake"], best_without["kelly"]["stake"])
+        self.assertGreater(best_with["kelly"]["stake"], 0)
+
+    def test_marginal_edges_are_filtered_out(self):
+        # Un edge brut inférieur à la décote ne peut plus être déclaré valeur.
+        model = {"1X2": {"HOME": 0.40, "DRAW": 0.30, "AWAY": 0.30}}
+        quotes = [
+            {"market": "1X2", "selection": "HOME", "odds": 2.55},
+            {"market": "1X2", "selection": "DRAW", "odds": 3.40},
+            {"market": "1X2", "selection": "AWAY", "odds": 3.40},
+        ]
+        found = an.find_value_bets(model, quotes, min_edge=0.0, edge_haircut=0.02)
+        marginal = [
+            r for r in found if 0 < r["edge_raw"] < 0.02
+        ]
+        self.assertTrue(marginal, "le cas de test doit contenir un edge marginal")
+        for row in marginal:
+            self.assertFalse(row["is_value"])
+            self.assertEqual(row["kelly"]["stake"], 0.0)
+
+    def test_verdict_names_the_haircut_when_nothing_qualifies(self):
+        markets = an.market_probabilities(an.score_grid(1.4, 1.3))
+        quotes = [
+            {"market": "1X2", "selection": "HOME", "odds": 2.45},
+            {"market": "1X2", "selection": "DRAW", "odds": 3.30},
+            {"market": "1X2", "selection": "AWAY", "odds": 2.90},
+        ]
+        value = an.find_value_bets(markets, quotes, bankroll=500)
+        verdict = an.build_verdict(markets, an.sample_confidence(30, 30), value)
+        self.assertEqual(verdict["action"], "PASSER")
+        self.assertTrue(any("décote" in w for w in verdict["warnings"]))
+
+
 class TestAnalyseMatch(unittest.TestCase):
 
     def test_full_analysis_structure(self):

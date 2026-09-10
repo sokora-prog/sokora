@@ -81,14 +81,100 @@ donc un ROI comparable à ce qu'aurait donné la stratégie en conditions réell
 
 ---
 
-## 2. Architecture
+## 2. L'hypothèse de départ : le marché a raison
+
+La plupart des outils de paris supposent l'inverse — que leur modèle voit ce que
+le marché ne voit pas — et se contentent d'afficher un « edge » sans jamais le
+vérifier. Cette application fait le pari opposé :
+
+> **Par défaut, la cote de clôture est la meilleure estimation disponible.
+> C'est au modèle de prouver, chiffres en main, qu'il apporte une information
+> qu'elle ne contient pas. Tant que la preuve n'est pas faite, l'outil conseille
+> de ne pas parier.**
+
+Cette hypothèse est appliquée en trois endroits concrets.
+
+### a) La décote des edges (« malédiction du vainqueur »)
+
+Sur un match, l'outil évalue une trentaine de sélections. Chacune porte une
+erreur d'estimation, et **le maximum d'un ensemble d'estimations bruitées est
+systématiquement trop optimiste** : la sélection qui ressort en tête est
+souvent celle dont l'erreur joue le plus en votre faveur.
+
+Tout edge estimé subit donc une décote de 2 points avant d'être déclaré
+exploitable, et la mise de Kelly est calculée sur la probabilité *après* décote.
+Sur le jeu de démonstration, cette seule correction fait passer de 6 « paris de
+valeur » à 0. Le paramètre `edge_haircut` permet de la régler, y compris à zéro
+pour comparer.
+
+### b) La calibration face au marché — `GET /sport/calibration`
+
+L'outil rejoue l'historique, prévision par prévision, en n'utilisant chaque fois
+que les matchs antérieurs au coup d'envoi, et compare :
+
+| Mesure | Ce qu'elle dit |
+|---|---|
+| **Score de Brier** du modèle *contre* celui de la cote de clôture sans marge | qui prévoit le mieux, sur une règle de score propre |
+| **Log-loss** | même question, en pénalisant durement les certitudes erronées |
+| **Skill score** | l'écart relatif : positif = le modèle apporte quelque chose |
+| **Courbe de fiabilité** | quand le modèle annonce 30 %, cela arrive-t-il 30 % du temps ? |
+| **Poids marché optimal** | le mélange modèle/marché qui aurait minimisé la log-loss — **mesuré, pas choisi** |
+
+Trois verdicts possibles : `AUCUNE DONNÉE`, `ÉCHANTILLON INSUFFISANT`
+(moins de 100 prévisions — aucune conclusion n'est permise), `PAS MIEUX QUE LE
+MARCHÉ`, ou `MODÈLE INFORMATIF`. Dans les trois premiers cas, le poids marché
+recommandé est **1,00** : suivre le marché et s'abstenir.
+
+### c) La significativité et le risque
+
+- **Combien de paris faut-il pour trancher ?** Détecter un avantage réel de 2 %
+  à cote 2,00 demande **environ 20 000 paris** à 95 % de confiance ; à cote 3,30,
+  plus de 45 000. Un ROI positif sur une saison ne prouve donc à peu près rien —
+  d'où l'insistance de l'outil sur le **CLV**, qui conclut en quelques dizaines
+  de paris.
+- **Test de significativité** sur le yield et sur le CLV, avec intervalle de
+  confiance : l'outil dit explicitement quand un résultat est indistinguable du
+  hasard.
+- **Simulation de Monte-Carlo** — `GET /sport/risk-simulation` — qui sépare deux
+  choses que tout le monde confond :
+
+  | Paramètre | Rôle |
+  |---|---|
+  | `believed_edge` | l'avantage que l'on **croit** détenir → il dimensionne la mise |
+  | `true_edge` | l'avantage **réellement** détenu → il détermine les résultats |
+
+  Le scénario par défaut de l'onglet Réalisme fait diverger les deux : croire
+  4 % quand on a −2 %. Sur 2 000 trajectoires de 500 paris, la médiane termine à
+  −12 %, 72 % des trajectoires perdent et 77 % subissent un recul de plus de
+  20 % — sans que rien, dans le comportement de mise, n'ait paru anormal.
+
+  L'autre enseignement va dans l'autre sens : **même avec un avantage réel de
+  2 %, 36 % des trajectoires finissent en perte sur 500 paris**. Un résultat
+  négatif ne prouve pas que la méthode est mauvaise, ni un résultat positif
+  qu'elle est bonne.
+
+### Une mise en garde sur le jeu de démonstration
+
+Le championnat de démonstration est engendré par le processus de Poisson que le
+modèle suppose : le modèle y est **bien spécifié**, ce qui n'arrive jamais dans
+la réalité. Ses résultats de calibration y sont donc flatteurs, et l'application
+l'affiche explicitement dès qu'une mesure porte sur ces données. Sur de vraies
+données, la cote de clôture intègre les compositions, les absences et l'argent
+des professionnels : elle est bien plus difficile à battre. On le voit d'ailleurs
+dans la démo elle-même — le modèle devance le marché sur le 1X2, mais perd
+nettement sur le total de buts.
+
+---
+
+## 3. Architecture
 
 ```
 backend/app/analytics_sport.py   moteur statistique pur (aucune dépendance, aucun accès base)
+backend/app/calibration_sport.py calibration face au marché, significativité, Monte-Carlo
 backend/app/models_sport.py      tables : compétitions, équipes, matchs, cotes, paris, bankroll
 backend/app/router_sport.py      API REST /sport
 backend/migrations/sport_v1.sql  migration SQL idempotente
-backend/tests/                   76 tests du moteur (unittest, sans dépendance)
+backend/tests/                   122 tests des deux moteurs (unittest, sans dépendance)
 sport-dashboard/                 interface React + Vite (port 5177)
 ```
 
@@ -97,7 +183,7 @@ statistique testable ligne à ligne, et réutilisable hors de l'API.
 
 ---
 
-## 3. Démarrage
+## 4. Démarrage
 
 ### Backend
 
@@ -138,7 +224,7 @@ cd backend && python3 -m unittest discover -s tests -v
 
 ---
 
-## 4. Alimenter l'outil avec ses propres données
+## 5. Alimenter l'outil avec ses propres données
 
 L'import CSV (onglet **Données**) accepte le séparateur `,` ou `;` et reconnaît
 les en-têtes usuels :
@@ -158,7 +244,7 @@ Les équipes inconnues sont créées automatiquement et un même match ne peut p
 
 ---
 
-## 5. Principaux points d'API
+## 6. Principaux points d'API
 
 | Méthode | Chemin | Rôle |
 |---|---|---|
@@ -167,6 +253,8 @@ Les équipes inconnues sont créées automatiquement et un même match ne peut p
 | POST | `/sport/predict` | analyse à la demande de deux équipes + cotes |
 | GET | `/sport/value-bets` | balayage des matchs à venir, classés par edge |
 | GET | `/sport/backtest` | simulation historique sans fuite d'information |
+| GET | `/sport/calibration` | **le modèle bat-il la cote de clôture ?** |
+| GET | `/sport/risk-simulation` | Monte-Carlo : avantage cru contre avantage réel |
 | GET | `/sport/competitions/{id}/table` | classement enrichi + forces d'équipe |
 | GET | `/sport/teams/{id}/stats` | fiche d'équipe (forme, domicile/extérieur, Elo) |
 | POST | `/sport/matches/import` | import CSV en masse |
@@ -176,11 +264,11 @@ Les équipes inconnues sont créées automatiquement et un même match ne peut p
 | GET | `/sport/performance` | ROI, drawdown, CLV, bilan par marché |
 
 Paramètres réglables sur l'analyse : `min_edge`, `kelly_fraction`,
-`market_weight`, `half_life_days`, `form_window`, `bankroll`.
+`market_weight`, `edge_haircut`, `half_life_days`, `form_window`, `bankroll`.
 
 ---
 
-## 6. Limites à connaître
+## 7. Limites à connaître
 
 - **Le modèle ignore ce qu'il ne voit pas** : blessures, suspensions, enjeu,
   météo, calendrier européen. Les champs `home_boost` / `away_boost` (1,00 =
@@ -192,7 +280,11 @@ Paramètres réglables sur l'analyse : `min_edge`, `kelly_fraction`,
 - **Les marchés liquides sont efficients.** Sur un 1X2 de grand championnat,
   trouver 5 % d'edge réel est rare ; un edge affiché de 15 % traduit
   généralement une erreur de saisie ou un échantillon trop court, pas une
-  aubaine.
+  aubaine. L'onglet Réalisme existe précisément pour vous en convaincre avec
+  vos propres données plutôt qu'avec un argument d'autorité.
+- **La calibration ne se transpose pas d'un marché à l'autre.** Un modèle qui
+  bat la cote sur le 1X2 peut être franchement mauvais sur le total de buts.
+  Mesurez chaque marché séparément avant de le jouer.
 - **Le backtest surestime** dès que les cotes historiques manquent ou ont été
   relevées après coup.
 - Un ROI positif sur moins d'une centaine de paris ne prouve rien : c'est le

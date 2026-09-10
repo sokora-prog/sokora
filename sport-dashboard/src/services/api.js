@@ -47,6 +47,10 @@ export const sportApi = {
   valueBets:      params           => api.get('/sport/value-bets', { params }),
   backtest:       params           => api.get('/sport/backtest', { params }),
 
+  // Réalisme : le modèle bat-il le marché, et à quel risque ?
+  calibration:    params           => api.get('/sport/calibration', { params }),
+  riskSimulation: params           => api.get('/sport/risk-simulation', { params }),
+
   // Paris et bankroll
   bets:           params           => api.get('/sport/bets', { params }),
   createBet:      d                => api.post('/sport/bets', d),

@@ -6,6 +6,7 @@ import ValueBets from './components/ValueBets.jsx';
 import BetTracker from './components/BetTracker.jsx';
 import DataManager from './components/DataManager.jsx';
 import Backtest from './components/Backtest.jsx';
+import Realism from './components/Realism.jsx';
 import { sportApi, errorMessage } from './services/api.js';
 
 const TABS = [
@@ -14,6 +15,7 @@ const TABS = [
   ['value', 'Valeur'],
   ['league', 'Championnats'],
   ['bets', 'Paris & bankroll'],
+  ['realism', 'Réalisme'],
   ['backtest', 'Backtest'],
   ['data', 'Données'],
 ];
@@ -89,7 +91,11 @@ export default function App() {
         )}
 
         {tab === 'dashboard' && (
-          <Dashboard onOpenMatch={openMatch} onSeeded={loadReferences} />
+          <Dashboard
+            onOpenMatch={openMatch}
+            onSeeded={loadReferences}
+            onOpenRealism={() => setTab('realism')}
+          />
         )}
         {tab === 'matches' && (
           <Matches
@@ -102,6 +108,7 @@ export default function App() {
         {tab === 'value' && <ValueBets competitions={competitions} onOpenMatch={openMatch} />}
         {tab === 'league' && <LeagueTable competitions={competitions} />}
         {tab === 'bets' && <BetTracker onChanged={loadReferences} />}
+        {tab === 'realism' && <Realism competitions={competitions} />}
         {tab === 'backtest' && <Backtest competitions={competitions} />}
         {tab === 'data' && (
           <DataManager competitions={competitions} teams={teams} onChanged={loadReferences} />
