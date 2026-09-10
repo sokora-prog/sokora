@@ -62,6 +62,14 @@ class ForecastRecord:
     odds: Dict[str, float] = field(default_factory=dict)
     kickoff: Optional[datetime] = None
     label: str = ""
+    #: Métadonnées de segmentation, pour savoir *où* se situe un avantage.
+    competition: Optional[object] = None
+    expected_total: Optional[float] = None
+
+    @property
+    def favourite_probability(self) -> float:
+        """Probabilité de l'issue la plus probable selon le marché."""
+        return max(self.market.values()) if self.market else 0.0
 
     def blended(self, market_weight: float) -> Dict[str, float]:
         w = min(1.0, max(0.0, market_weight))
@@ -627,6 +635,161 @@ def _simulation_message(
         "sur cette durée ne prouve donc pas que la méthode est mauvaise — ni un "
         "résultat positif qu'elle est bonne."
     )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  CARTE DES AVANTAGES — OÙ, PRÉCISÉMENT ?
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Personne n'a d'avantage partout. Un modèle peut être inutile sur les grosses
+# affiches d'un championnat très couvert et apporter quelque chose sur les
+# matchs serrés d'une division mineure. Mesurer globalement noie ces poches ;
+# les segmenter les fait apparaître — au prix d'un piège qu'il faut nommer :
+# à force de découper, une poche finit toujours par sembler gagnante par pur
+# hasard. D'où l'exigence d'effectif minimal et le rappel du nombre de
+# comparaisons effectuées.
+
+#: Effectif en dessous duquel une poche n'est même pas affichée comme candidate.
+MIN_SEGMENT_SAMPLE = 60
+
+
+def segment_skill(records: Sequence[ForecastRecord]) -> dict:
+    """Résultat d'un segment : le modèle y bat-il le marché ?"""
+    n = len(records)
+    brier_model = brier_score(records, "model")
+    brier_market = brier_score(records, "market")
+    skill = skill_score(brier_model, brier_market)
+
+    # Écart de score match par match : permet de tester si l'avantage observé
+    # tient du hasard, ce qu'un simple skill score ne dit pas.
+    differences = []
+    for record in records:
+        model_error = sum(
+            (p - (1.0 if sel == record.winner else 0.0)) ** 2
+            for sel, p in record.model.items()
+        )
+        market_error = sum(
+            (p - (1.0 if sel == record.winner else 0.0)) ** 2
+            for sel, p in record.market.items()
+        )
+        differences.append(market_error - model_error)  # > 0 = modèle meilleur
+
+    test = significance_test(differences) if n >= 2 else None
+    reliable = n >= MIN_SEGMENT_SAMPLE
+    beats = bool(
+        reliable and skill is not None and skill > SKILL_THRESHOLD
+        and test and test["significant"] and test["mean"] > 0
+    )
+
+    return {
+        "sample": n,
+        "brier_model": round(brier_model, 5) if brier_model is not None else None,
+        "brier_market": round(brier_market, 5) if brier_market is not None else None,
+        "skill_score": round(skill, 5) if skill is not None else None,
+        "skill_pct": round(skill * 100, 2) if skill is not None else None,
+        "p_value": test["p_value"] if test else None,
+        "significant": bool(test and test["significant"]) if test else False,
+        "reliable_sample": reliable,
+        "beats_market": beats,
+        "status": (
+            "AVANTAGE ÉTAYÉ" if beats
+            else "ÉCHANTILLON TROP COURT" if not reliable
+            else "PAS D'AVANTAGE"
+        ),
+    }
+
+
+def edge_map(
+    records: Sequence[ForecastRecord],
+    competition_names: Optional[Dict[object, str]] = None,
+) -> dict:
+    """Découpe l'échantillon en poches et cherche où le modèle tient debout.
+
+    Trois découpages, choisis parce qu'ils correspondent à des décisions réelles
+    du parieur : sur quelle compétition jouer, sur quel marché, et sur quel type
+    d'affiche.
+    """
+    names = competition_names or {}
+
+    def bucket_by(key_of) -> List[dict]:
+        groups: Dict[object, List[ForecastRecord]] = {}
+        for record in records:
+            key = key_of(record)
+            if key is None:
+                continue
+            groups.setdefault(key, []).append(record)
+        rows = [
+            {"segment": str(key), **segment_skill(group)}
+            for key, group in groups.items()
+        ]
+        rows.sort(key=lambda r: (r["skill_score"] or -1), reverse=True)
+        return rows
+
+    def affiche(record: ForecastRecord) -> Optional[str]:
+        """Type d'affiche selon ce que le marché en dit."""
+        top = record.favourite_probability
+        if not top:
+            return None
+        if top >= 0.60:
+            return "Favori net (marché ≥ 60 %)"
+        if top >= 0.45:
+            return "Favori modéré (45–60 %)"
+        return "Affiche ouverte (< 45 %)"
+
+    def total_bucket(record: ForecastRecord) -> Optional[str]:
+        if record.expected_total is None:
+            return None
+        if record.expected_total >= 3.0:
+            return "Match attendu prolifique (≥ 3 buts)"
+        if record.expected_total >= 2.4:
+            return "Total attendu moyen (2,4–3)"
+        return "Match attendu fermé (< 2,4 buts)"
+
+    segments = {
+        "par_competition": bucket_by(
+            lambda r: names.get(r.competition, str(r.competition))
+            if r.competition is not None else None
+        ),
+        "par_marche": bucket_by(lambda r: r.market_key),
+        "par_affiche": bucket_by(affiche),
+        "par_total_attendu": bucket_by(total_bucket),
+    }
+
+    comparisons = sum(len(rows) for rows in segments.values())
+    winners = [
+        {"famille": family, **row}
+        for family, rows in segments.items()
+        for row in rows if row["beats_market"]
+    ]
+    winners.sort(key=lambda r: r["skill_score"], reverse=True)
+
+    if not records:
+        message = "Aucune prévision cotée : rien à segmenter."
+    elif winners:
+        best = winners[0]
+        message = (
+            f"{len(winners)} poche(s) où le modèle bat le marché, la meilleure "
+            f"étant « {best['segment']} » ({best['skill_pct']:+.2f} % de skill sur "
+            f"{best['sample']} prévisions, p = {best['p_value']}). Attention : "
+            f"{comparisons} segments ont été testés — plus on découpe, plus une "
+            "poche gagnante par hasard devient probable. À confirmer sur des "
+            "données nouvelles avant d'y engager de l'argent."
+        )
+    else:
+        message = (
+            f"Aucune poche ne montre d'avantage étayé sur les {comparisons} segments "
+            f"testés. C'est le résultat le plus fréquent, et il a le mérite d'être "
+            "clair : il n'y a rien à exploiter ici pour l'instant."
+        )
+
+    return {
+        "sample": len(records),
+        "segments": segments,
+        "winners": winners,
+        "comparisons": comparisons,
+        "min_segment_sample": MIN_SEGMENT_SAMPLE,
+        "message": message,
+    }
 
 
 # ════════════════════════════════════════════════════════════════════════════

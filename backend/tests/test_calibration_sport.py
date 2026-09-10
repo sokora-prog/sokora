@@ -403,6 +403,105 @@ class TestSimulation(unittest.TestCase):
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  CARTE DES AVANTAGES
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestSegmentSkill(unittest.TestCase):
+
+    def test_short_segment_is_never_credited(self):
+        records = build_records(30, model_sigma=0.0, market_sigma=0.20, seed=41)
+        result = cal.segment_skill(records)
+        self.assertFalse(result["reliable_sample"])
+        self.assertFalse(result["beats_market"])
+        self.assertEqual(result["status"], "ÉCHANTILLON TROP COURT")
+
+    def test_genuine_advantage_on_a_large_segment(self):
+        records = build_records(500, model_sigma=0.0, market_sigma=0.18, seed=42)
+        result = cal.segment_skill(records)
+        self.assertTrue(result["reliable_sample"])
+        self.assertGreater(result["skill_score"], 0)
+        self.assertTrue(result["significant"])
+        self.assertTrue(result["beats_market"])
+        self.assertEqual(result["status"], "AVANTAGE ÉTAYÉ")
+
+    def test_worse_model_is_not_credited(self):
+        records = build_records(400, model_sigma=0.18, market_sigma=0.0, seed=43)
+        result = cal.segment_skill(records)
+        self.assertLess(result["skill_score"], 0)
+        self.assertFalse(result["beats_market"])
+        self.assertEqual(result["status"], "PAS D'AVANTAGE")
+
+    def test_equivalent_sources_are_not_credited(self):
+        records = build_records(400, model_sigma=0.09, market_sigma=0.09, seed=44)
+        result = cal.segment_skill(records)
+        self.assertFalse(result["beats_market"])
+
+
+class TestEdgeMap(unittest.TestCase):
+
+    def tagged(self, n, market_sigma, model_sigma, market_key, competition, seed):
+        records = build_records(n, model_sigma=model_sigma,
+                                market_sigma=market_sigma, seed=seed)
+        for index, record in enumerate(records):
+            record.market_key = market_key
+            record.competition = competition
+            record.expected_total = 2.0 + (index % 3)
+        return records
+
+    def test_empty_input(self):
+        result = cal.edge_map([])
+        self.assertEqual(result["sample"], 0)
+        self.assertEqual(result["winners"], [])
+        self.assertIn("rien à segmenter", result["message"])
+
+    def test_segments_cover_every_family(self):
+        records = self.tagged(200, 0.10, 0.10, "1X2", 1, 45)
+        result = cal.edge_map(records, {1: "Ligue A"})
+        for family in ("par_competition", "par_marche", "par_affiche", "par_total_attendu"):
+            self.assertIn(family, result["segments"])
+        self.assertEqual(result["segments"]["par_competition"][0]["segment"], "Ligue A")
+        self.assertEqual(result["segments"]["par_marche"][0]["segment"], "1X2")
+        self.assertEqual(result["sample"], 200)
+
+    def test_a_real_pocket_is_surfaced(self):
+        strong = self.tagged(400, market_sigma=0.20, model_sigma=0.0,
+                             market_key="OU_2.5", competition=2, seed=46)
+        weak = self.tagged(400, market_sigma=0.0, model_sigma=0.20,
+                           market_key="1X2", competition=1, seed=47)
+        result = cal.edge_map(strong + weak, {1: "Ligue A", 2: "Ligue B"})
+        winning_segments = {row["segment"] for row in result["winners"]}
+        self.assertIn("OU_2.5", winning_segments)
+        self.assertNotIn("1X2", winning_segments)
+        self.assertIn("Ligue B", winning_segments)
+        self.assertNotIn("Ligue A", winning_segments)
+
+    def test_message_warns_about_multiple_comparisons(self):
+        records = self.tagged(400, market_sigma=0.20, model_sigma=0.0,
+                              market_key="1X2", competition=1, seed=48)
+        result = cal.edge_map(records, {1: "Ligue A"})
+        self.assertTrue(result["winners"])
+        self.assertIn("segments ont été testés", result["message"])
+        self.assertGreater(result["comparisons"], 1)
+
+    def test_nothing_found_is_stated_plainly(self):
+        records = self.tagged(300, market_sigma=0.0, model_sigma=0.20,
+                              market_key="1X2", competition=1, seed=49)
+        result = cal.edge_map(records, {1: "Ligue A"})
+        self.assertEqual(result["winners"], [])
+        self.assertIn("Aucune poche", result["message"])
+
+    def test_segments_are_sorted_by_skill(self):
+        records = (
+            self.tagged(200, 0.20, 0.0, "OU_2.5", 1, 50)
+            + self.tagged(200, 0.0, 0.20, "1X2", 1, 51)
+        )
+        result = cal.edge_map(records, {1: "Ligue A"})
+        markets = result["segments"]["par_marche"]
+        self.assertEqual(markets[0]["segment"], "OU_2.5")
+        self.assertGreater(markets[0]["skill_score"], markets[1]["skill_score"])
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  SYNTHÈSE
 # ════════════════════════════════════════════════════════════════════════════
 

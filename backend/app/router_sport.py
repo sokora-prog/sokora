@@ -356,6 +356,29 @@ def _team_names(db: Session, competition_id: Optional[int] = None) -> Dict[int, 
     return {t.id: t.name for t in q.all()}
 
 
+def _match_record(match: SportMatch) -> an.MatchRecord:
+    """Convertit un match en unité de calcul pour le moteur.
+
+    Point de passage unique : reconstruire cet objet à la main ailleurs revient
+    tôt ou tard à oublier un champ — les tirs, par exemple, dont l'absence
+    ferait silencieusement retomber toutes les variantes du modèle sur les buts.
+    """
+    return an.MatchRecord(
+        home=match.home_team_id,
+        away=match.away_team_id,
+        home_goals=match.home_goals,
+        away_goals=match.away_goals,
+        kickoff=match.kickoff,
+        competition=match.competition_id,
+        home_xg=match.home_xg,
+        away_xg=match.away_xg,
+        home_shots=match.home_shots,
+        away_shots=match.away_shots,
+        home_shots_on_target=match.home_shots_on_target,
+        away_shots_on_target=match.away_shots_on_target,
+    )
+
+
 def _history(
     db: Session,
     competition_id: Optional[int] = None,
@@ -371,21 +394,10 @@ def _history(
         q = q.filter(SportMatch.competition_id == competition_id)
     if before:
         q = q.filter(SportMatch.kickoff < before)
-    records = []
-    for m in q.all():
-        if m.home_goals is None or m.away_goals is None:
-            continue
-        records.append(an.MatchRecord(
-            home=m.home_team_id,
-            away=m.away_team_id,
-            home_goals=m.home_goals,
-            away_goals=m.away_goals,
-            kickoff=m.kickoff,
-            competition=m.competition_id,
-            home_xg=m.home_xg,
-            away_xg=m.away_xg,
-        ))
-    return records
+    return [
+        _match_record(m) for m in q.all()
+        if m.home_goals is not None and m.away_goals is not None
+    ]
 
 
 def _quotes_payload(match: SportMatch, closing: Optional[bool] = None) -> List[dict]:
@@ -1172,6 +1184,7 @@ def _forecast_records(
     limit: int = 600,
     devig: str = "proportional",
     bookmaker: Optional[str] = None,
+    signal: str = "goals",
 ) -> Tuple[List[cal.ForecastRecord], dict]:
     """Rejoue l'historique pour confronter le modèle au marché, match par match.
 
@@ -1210,6 +1223,7 @@ def _forecast_records(
         def flush_day():
             """Évalue les matchs d'une même journée avec les forces d'avant-match."""
             nonlocal strengths, baseline
+            extras: Dict[str, float] = {}
             for match in pending_day:
                 quotes = _market_quotes(match, market_key, preference)
                 if len(quotes) < 2:
@@ -1235,6 +1249,8 @@ def _forecast_records(
                     strengths.get(match.away_team_id),
                     baseline,
                 )
+                extras["expected_home"] = lam_h
+                extras["expected_away"] = lam_a
                 model_markets = an.market_probabilities(
                     an.score_grid(lam_h, lam_a),
                     handicap_lines=an.handicap_lines_from_quotes(
@@ -1266,6 +1282,10 @@ def _forecast_records(
                     label=(
                         f"{names.get(match.home_team_id)} — {names.get(match.away_team_id)}"
                     ),
+                    competition=match.competition_id,
+                    expected_total=round(
+                        extras.get("expected_home", 0) + extras.get("expected_away", 0), 3
+                    ),
                 ))
                 stats["evaluated"] += 1
                 if match.competition and match.competition.name == DEMO_COMPETITION_NAME:
@@ -1276,15 +1296,11 @@ def _forecast_records(
             if day != current_day:
                 if pending_day and len(played) >= min_history:
                     strengths, baseline = an.team_strengths(
-                        played, reference=pending_day[0].kickoff
+                        played, reference=pending_day[0].kickoff, signal=signal
                     )
                     flush_day()
                 for done in pending_day:
-                    played.append(an.MatchRecord(
-                        home=done.home_team_id, away=done.away_team_id,
-                        home_goals=done.home_goals, away_goals=done.away_goals,
-                        kickoff=done.kickoff, competition=done.competition_id,
-                    ))
+                    played.append(_match_record(done))
                 pending_day = []
                 current_day = day
             pending_day.append(match)
@@ -1292,7 +1308,9 @@ def _forecast_records(
                 break
 
         if pending_day and len(played) >= min_history and len(records) < limit:
-            strengths, baseline = an.team_strengths(played, reference=pending_day[0].kickoff)
+            strengths, baseline = an.team_strengths(
+                played, reference=pending_day[0].kickoff, signal=signal
+            )
             flush_day()
 
     return records, stats
@@ -1420,6 +1438,175 @@ def calibration(
         ),
         "demo_caveat": DEMO_CAVEAT if stats.get("demo_data") else None,
     }
+
+
+@router.get("/model-comparison")
+def model_comparison(
+    competition_id: Optional[int] = None,
+    market: str = Query("1X2"),
+    min_history: int = Query(30, ge=10, le=500),
+    limit: int = Query(600, ge=50, le=2000),
+    variants: str = Query(
+        "goals,shots,blend",
+        description="Variantes de signal à comparer, séparées par des virgules"),
+    db: Session = Depends(get_db),
+):
+    """Banc d'essai : quelle façon de mesurer la force d'une équipe prédit le mieux ?
+
+    Chaque variante est rejouée sur exactement le même historique et confrontée
+    à la même cote de clôture. Les buts sont l'issue qui compte mais un
+    indicateur bruité ; les tirs sont bien plus nombreux, donc plus stables.
+    Lequel gagne n'est pas une affaire d'opinion : c'est ce que cet endpoint
+    mesure, sur vos données.
+    """
+    market_key = market.strip().upper()
+    wanted = [v.strip().lower() for v in variants.split(",") if v.strip()]
+    unknown = [v for v in wanted if v not in an.SIGNAL_VARIANTS]
+    if unknown:
+        raise HTTPException(
+            400,
+            f"Variante(s) inconnue(s) : {', '.join(unknown)}. "
+            f"Disponibles : {', '.join(an.SIGNAL_VARIANTS)}",
+        )
+
+    history = _history(db, competition_id)
+    rows: List[dict] = []
+    reference_brier: Optional[float] = None
+
+    for variant in wanted:
+        records, stats = _forecast_records(
+            db, competition_id=competition_id, market_key=market_key,
+            min_history=min_history, limit=limit, signal=variant,
+        )
+        if not records:
+            rows.append({
+                "variant": variant, "sample": 0,
+                "coverage": round(an.signal_coverage(history, variant), 3),
+                "note": "aucune prévision cotée à évaluer",
+            })
+            continue
+        report = cal.calibration_report(records)
+        reference_brier = report["brier_market"]
+        rows.append({
+            "variant": variant,
+            "sample": report["sample"],
+            "coverage": round(an.signal_coverage(history, variant), 3),
+            "brier": report["brier_model"],
+            "log_loss": report["log_loss_model"],
+            "skill_score": report["brier_skill_score"],
+            "skill_pct": round((report["brier_skill_score"] or 0) * 100, 2),
+            "optimal_market_weight": report["optimal_market_weight"],
+            "beats_market": report["beats_market"],
+            "verdict": report["verdict"],
+        })
+
+    scored = [r for r in rows if r.get("brier") is not None]
+    scored.sort(key=lambda r: r["brier"])
+    best = scored[0] if scored else None
+    baseline_row = next((r for r in rows if r["variant"] == "goals"), None)
+
+    if not scored:
+        message = (
+            "Aucune prévision cotée : importez des saisons avec leurs cotes de "
+            "clôture pour que le banc puisse trancher."
+        )
+    elif best["beats_market"]:
+        message = (
+            f"La variante « {best['variant']} » devance la cote de clôture de "
+            f"{best['skill_pct']:+.2f} % sur {best['sample']} prévisions. C'est le "
+            "seul cas où s'écarter du marché se défend — et encore, à confirmer "
+            "sur des données que le réglage n'a pas vues."
+        )
+    else:
+        improvement = (
+            best["brier"] - baseline_row["brier"]
+            if baseline_row and baseline_row.get("brier") is not None else None
+        )
+        detail = ""
+        if improvement is not None and best["variant"] != "goals":
+            detail = (
+                f" Elle améliore tout de même le score de Brier de "
+                f"{abs(improvement):.5f} par rapport aux buts seuls."
+                if improvement < 0 else
+                " Aucune variante ne fait mieux que les buts seuls."
+            )
+        message = (
+            f"La meilleure variante est « {best['variant']} », mais aucune ne bat "
+            f"la cote de clôture (skill {best['skill_pct']:+.2f} %).{detail} "
+            "Le marché reste la meilleure estimation disponible."
+        )
+
+    return {
+        "market": market_key,
+        "reference": {
+            "source": "cote de clôture dévigorisée",
+            "brier": reference_brier,
+        },
+        "variants": rows,
+        "ranking": [r["variant"] for r in scored],
+        "best": best["variant"] if best else None,
+        "message": message,
+        "note": (
+            "Les buts sont l'issue qui compte, mais un tir cadré est une "
+            "observation cinq à dix fois plus fréquente : sur une demi-saison, "
+            "les tirs disent souvent mieux que les buts ce qu'une équipe vaut. "
+            "Encore faut-il que le fichier importé les contienne — voir la "
+            "couverture de chaque variante."
+        ),
+    }
+
+
+@router.get("/edge-map")
+def edge_map(
+    competition_id: Optional[int] = None,
+    market: Optional[str] = Query(
+        None, description="Limiter à un marché ; sinon tous ceux qui ont des cotes"),
+    signal: str = Query("goals"),
+    min_history: int = Query(30, ge=10, le=500),
+    limit: int = Query(1200, ge=50, le=4000),
+    db: Session = Depends(get_db),
+):
+    """Où se situe l'avantage, s'il en existe un ?
+
+    Un avantage moyen nul peut cacher une poche réelle — et, plus souvent,
+    une poche gagnante n'est qu'un artefact du découpage. L'endpoint mesure
+    chaque segment, exige un effectif minimal, teste la significativité et
+    rappelle combien de comparaisons ont été faites.
+    """
+    if signal.lower() not in an.SIGNAL_VARIANTS:
+        raise HTTPException(400, f"Variante inconnue : {signal}")
+
+    markets = [market.strip().upper()] if market else None
+    if markets is None:
+        query = db.query(OddsQuote.market).distinct()
+        if competition_id:
+            query = (
+                query.join(SportMatch, OddsQuote.match_id == SportMatch.id)
+                .filter(SportMatch.competition_id == competition_id)
+            )
+        markets = sorted({row[0] for row in query.all()})
+        # Les marchés que le modèle sait coter d'office ; le reste demanderait
+        # une ligne de handicap par match et n'a pas de sens en agrégat.
+        markets = [m for m in markets if m == "1X2" or m.startswith("OU_") or m == "BTTS"]
+
+    competitions = {c.id: c.name for c in db.query(Competition).all()}
+    all_records: List[cal.ForecastRecord] = []
+    coverage = {"markets": markets, "evaluated": 0, "demo_data": False}
+
+    for market_key in markets:
+        records, stats = _forecast_records(
+            db, competition_id=competition_id, market_key=market_key,
+            min_history=min_history, limit=limit, signal=signal,
+        )
+        all_records.extend(records)
+        coverage["evaluated"] += stats["evaluated"]
+        coverage["demo_data"] = coverage["demo_data"] or stats.get("demo_data", False)
+
+    result = cal.edge_map(all_records, competitions)
+    result["coverage"] = coverage
+    result["signal"] = signal
+    result["demo_caveat"] = DEMO_CAVEAT if coverage["demo_data"] else None
+    return result
 
 
 @router.get("/risk-simulation")
@@ -1750,11 +1937,7 @@ def backtest(
                     })
             else:
                 skipped_no_odds += 1
-        played.append(an.MatchRecord(
-            home=match.home_team_id, away=match.away_team_id,
-            home_goals=match.home_goals, away_goals=match.away_goals,
-            kickoff=match.kickoff, competition=match.competition_id,
-        ))
+        played.append(_match_record(match))
 
     performance = an.bet_performance(simulated, starting_bankroll=0.0)
     return {
@@ -2066,7 +2249,14 @@ def seed_demo(
                 home_goals=simulate(lam_h), away_goals=simulate(lam_a),
                 home_xg=round(lam_h + rng.uniform(-0.3, 0.3), 2),
                 away_xg=round(lam_a + rng.uniform(-0.3, 0.3), 2),
-                home_shots=rng.randint(6, 20), away_shots=rng.randint(4, 17),
+                # Les tirs suivent la domination réelle, comme dans un vrai match :
+                # environ quatre tirs cadrés par but attendu, et trois tirs tentés
+                # par tir cadré. Sans cela, la variante « tirs » du banc d'essai
+                # n'aurait aucun signal à trouver et serait injustement condamnée.
+                home_shots_on_target=simulate(4 * lam_h),
+                away_shots_on_target=simulate(4 * lam_a),
+                home_shots=simulate(12 * lam_h),
+                away_shots=simulate(12 * lam_a),
                 home_corners=rng.randint(2, 11), away_corners=rng.randint(1, 9),
             )
             db.add(match)

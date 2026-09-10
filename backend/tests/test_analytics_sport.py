@@ -379,6 +379,217 @@ class TestStrengths(unittest.TestCase):
 #  FORME, CONFRONTATIONS, CLASSEMENT, ELO
 # ═══════════════════════════════════════════════════════════════════════════
 
+class TestSignalVariants(unittest.TestCase):
+    """Sur quoi mesurer la force : buts, tirs, xG ?"""
+
+    def records(self, with_shots=True, with_xg=False, n=40, seed=41):
+        import random
+        rng = random.Random(seed)
+        out = []
+        for i in range(n):
+            hg, ag = rng.randint(0, 4), rng.randint(0, 3)
+            out.append(an.MatchRecord(
+                f"A{i % 6}", f"B{i % 5}", hg, ag,
+                kickoff=D + timedelta(days=i * 3),
+                home_shots_on_target=rng.randint(2, 10) if with_shots else None,
+                away_shots_on_target=rng.randint(1, 9) if with_shots else None,
+                home_shots=rng.randint(6, 22) if with_shots else None,
+                away_shots=rng.randint(4, 18) if with_shots else None,
+                home_xg=round(rng.uniform(0.4, 2.8), 2) if with_xg else None,
+                away_xg=round(rng.uniform(0.3, 2.2), 2) if with_xg else None,
+            ))
+        return out
+
+    def test_proxy_is_rescaled_to_the_goal_mean(self):
+        records = self.records()
+        goal_mean = sum(m.total_goals for m in records) / len(records)
+        for variant in ("goals", "shots", "blend"):
+            series = an.signal_series(records, variant)
+            mean = sum(h + a for h, a in series) / len(series)
+            self.assertAlmostEqual(mean, goal_mean, places=6, msg=variant)
+
+    def test_shots_signal_differs_from_goals(self):
+        records = self.records()
+        goals = an.signal_series(records, "goals")
+        shots = an.signal_series(records, "shots")
+        self.assertNotEqual(goals, shots)
+
+    def test_blend_sits_between_its_two_sources(self):
+        records = self.records()
+        goals = an.signal_series(records, "goals")
+        shots = an.signal_series(records, "shots")
+        blend = an.signal_series(records, "blend")
+        w = an.BLEND_GOALS_WEIGHT
+        for (g, _), (s, _), (b, _) in zip(goals, shots, blend):
+            self.assertAlmostEqual(b, w * g + (1 - w) * s, places=6)
+
+    def test_missing_statistic_falls_back_to_goals(self):
+        records = self.records(with_shots=False)
+        self.assertEqual(
+            an.signal_series(records, "shots"), an.signal_series(records, "goals")
+        )
+        self.assertEqual(an.signal_coverage(records, "shots"), 0.0)
+
+    def test_partial_coverage_mixes_sources(self):
+        records = self.records()
+        records[0] = an.MatchRecord(
+            records[0].home, records[0].away, 2, 1, kickoff=records[0].kickoff
+        )
+        coverage = an.signal_coverage(records, "shots")
+        self.assertGreater(coverage, 0.9)
+        self.assertLess(coverage, 1.0)
+        series = an.signal_series(records, "shots")
+        # Le match sans statistique garde ses buts réels.
+        self.assertEqual(series[0], (2.0, 1.0))
+
+    def test_xg_is_used_when_present(self):
+        records = self.records(with_xg=True)
+        self.assertEqual(an.signal_coverage(records, "xg"), 1.0)
+        self.assertNotEqual(
+            an.signal_series(records, "xg"), an.signal_series(records, "goals")
+        )
+
+    def test_unknown_variant_raises(self):
+        with self.assertRaises(ValueError):
+            an.signal_series(self.records(), "intuition")
+
+    def test_strengths_depend_on_the_chosen_signal(self):
+        records = self.records()
+        by_goals, _ = an.team_strengths(records, signal="goals")
+        by_shots, _ = an.team_strengths(records, signal="shots")
+        differences = [
+            abs(by_goals[t].attack - by_shots[t].attack) for t in by_goals
+        ]
+        self.assertGreater(max(differences), 0.01)
+
+    def test_baseline_always_stays_on_real_goals(self):
+        records = self.records()
+        _, base_goals = an.team_strengths(records, signal="goals")
+        _, base_shots = an.team_strengths(records, signal="shots")
+        self.assertAlmostEqual(base_goals.goals_per_team, base_shots.goals_per_team, places=9)
+        self.assertAlmostEqual(base_goals.home_advantage, base_shots.home_advantage, places=9)
+
+    def test_informative_shots_predict_better_than_goals(self):
+        """Le seul test qui juge la variante — sur un monde où les tirs portent
+        bel et bien l'information, comme dans la réalité."""
+        import math
+        import random
+        rng = random.Random(17)
+        teams = [f"T{i}" for i in range(12)]
+        quality = {t: rng.uniform(0.75, 1.35) for t in teams}
+
+        def draw(lam):
+            limit, k, p = math.exp(-lam), 0, 1.0
+            while True:
+                p *= rng.random()
+                if p <= limit:
+                    return k
+                k += 1
+
+        def season(rounds, start_day):
+            out = []
+            for r in range(rounds):
+                order = teams[:]
+                rng.shuffle(order)
+                for i in range(0, len(order) - 1, 2):
+                    h, a = order[i], order[i + 1]
+                    lh = 1.45 * quality[h] / quality[a]
+                    la = 1.10 * quality[a] / quality[h]
+                    out.append(an.MatchRecord(
+                        h, a, draw(lh), draw(la),
+                        kickoff=D + timedelta(days=(start_day + r) * 7),
+                        home_shots_on_target=draw(4 * lh),
+                        away_shots_on_target=draw(4 * la),
+                        home_shots=draw(12 * lh), away_shots=draw(12 * la),
+                    ))
+            return out
+
+        history = season(22, 0)
+        future = season(10, 30)
+        reference = D + timedelta(days=22 * 7)
+
+        def out_of_sample_loss(variant):
+            strengths, baseline = an.team_strengths(
+                history, reference=reference, signal=variant
+            )
+            total, count = 0.0, 0
+            for match in future:
+                lam_h, lam_a = an.expected_goals(
+                    strengths.get(match.home), strengths.get(match.away), baseline
+                )
+                probability = an.market_probabilities(
+                    an.score_grid(lam_h, lam_a)
+                )["1X2"][match.outcome]
+                total -= math.log(max(probability, 1e-9))
+                count += 1
+            return total / count
+
+        self.assertLess(out_of_sample_loss("shots"), out_of_sample_loss("goals"))
+
+    def test_noisy_shots_are_not_rewarded(self):
+        """Symétrique du précédent : si les tirs sont du bruit, la variante doit
+        perdre. Sans quoi le banc d'essai serait un juge complaisant."""
+        import math
+        import random
+        rng = random.Random(23)
+        teams = [f"T{i}" for i in range(12)]
+        quality = {t: rng.uniform(0.75, 1.35) for t in teams}
+
+        def draw(lam):
+            limit, k, p = math.exp(-lam), 0, 1.0
+            while True:
+                p *= rng.random()
+                if p <= limit:
+                    return k
+                k += 1
+
+        def season(rounds, start_day):
+            out = []
+            for r in range(rounds):
+                order = teams[:]
+                rng.shuffle(order)
+                for i in range(0, len(order) - 1, 2):
+                    h, a = order[i], order[i + 1]
+                    lh = 1.45 * quality[h] / quality[a]
+                    la = 1.10 * quality[a] / quality[h]
+                    out.append(an.MatchRecord(
+                        h, a, draw(lh), draw(la),
+                        kickoff=D + timedelta(days=(start_day + r) * 7),
+                        home_shots_on_target=rng.randint(1, 9),
+                        away_shots_on_target=rng.randint(1, 9),
+                    ))
+            return out
+
+        history = season(22, 0)
+        future = season(10, 30)
+        reference = D + timedelta(days=22 * 7)
+
+        def out_of_sample_loss(variant):
+            strengths, baseline = an.team_strengths(
+                history, reference=reference, signal=variant
+            )
+            total, count = 0.0, 0
+            for match in future:
+                lam_h, lam_a = an.expected_goals(
+                    strengths.get(match.home), strengths.get(match.away), baseline
+                )
+                probability = an.market_probabilities(
+                    an.score_grid(lam_h, lam_a)
+                )["1X2"][match.outcome]
+                total -= math.log(max(probability, 1e-9))
+                count += 1
+            return total / count
+
+        self.assertGreater(out_of_sample_loss("shots"), out_of_sample_loss("goals"))
+
+    def test_analysis_reports_the_signal_used(self):
+        history, _ = make_league(rounds=20)
+        result = an.analyse_match(history, "T1", "T2", signal="shots")
+        self.assertEqual(result["signal"]["variant"], "shots")
+        # Aucun tir dans cet historique : la couverture doit le dire.
+        self.assertEqual(result["signal"]["coverage"], 0.0)
+
+
 class TestForm(unittest.TestCase):
 
     def setUp(self):

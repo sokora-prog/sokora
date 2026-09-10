@@ -89,6 +89,10 @@ class MatchRecord:
     competition: Optional[object] = None
     home_xg: Optional[float] = None
     away_xg: Optional[float] = None
+    home_shots: Optional[int] = None
+    away_shots: Optional[int] = None
+    home_shots_on_target: Optional[int] = None
+    away_shots_on_target: Optional[int] = None
 
     @property
     def total_goals(self) -> int:
@@ -337,6 +341,122 @@ def blend_probabilities(
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  SIGNAL D'ESTIMATION — SUR QUOI MESURER LA FORCE D'UNE ÉQUIPE ?
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Les buts marqués sont l'issue qui compte, mais un très mauvais indicateur de
+# la force réelle sur petit échantillon : un but tient à un poteau, à un arrêt,
+# à un hors-jeu. Les tirs, et surtout les tirs cadrés, sont bien plus nombreux
+# donc bien moins bruités, et prédisent mieux les buts futurs que les buts
+# passés eux-mêmes. Les xG, quand ils sont disponibles, font encore mieux.
+#
+# Le module propose donc plusieurs variantes de signal. Aucune n'est déclarée
+# meilleure a priori : c'est le banc d'essai (GET /sport/model-comparison) qui
+# tranche, en confrontant chacune à la cote de clôture.
+
+#: Variantes disponibles pour l'estimation des forces.
+SIGNAL_VARIANTS = ("goals", "shots", "xg", "blend")
+
+#: Poids des buts dans la variante « blend ». Le reste va au signal de tir :
+#: un compromis entre ce qui compte (les buts) et ce qui est stable (les tirs).
+BLEND_GOALS_WEIGHT = 0.4
+
+#: Part des tirs non cadrés dans le proxy de tir. Un tir cadré vaut bien plus
+#: qu'un tir tenté, sans que ce dernier soit dénué d'information (il traduit
+#: l'installation dans le camp adverse).
+SHOTS_ON_TARGET_WEIGHT = 0.85
+
+
+def _raw_signal(
+    record: MatchRecord,
+    variant: str,
+) -> Optional[Tuple[float, float]]:
+    """Signal brut d'un match, ou None si la donnée nécessaire manque."""
+    if variant == "goals":
+        return float(record.home_goals), float(record.away_goals)
+
+    if variant == "xg":
+        if record.home_xg is None or record.away_xg is None:
+            return None
+        return float(record.home_xg), float(record.away_xg)
+
+    if variant == "shots":
+        home_sot, away_sot = record.home_shots_on_target, record.away_shots_on_target
+        home_shots, away_shots = record.home_shots, record.away_shots
+        if home_sot is not None and away_sot is not None:
+            weight = SHOTS_ON_TARGET_WEIGHT
+            home = weight * home_sot + (1 - weight) * (home_shots or home_sot)
+            away = weight * away_sot + (1 - weight) * (away_shots or away_sot)
+            return float(home), float(away)
+        if home_shots is not None and away_shots is not None:
+            return float(home_shots), float(away_shots)
+        return None
+
+    raise ValueError(f"Variante de signal inconnue : {variant}")
+
+
+def signal_series(
+    matches: Sequence[MatchRecord],
+    variant: str = "goals",
+) -> List[Tuple[float, float]]:
+    """Signal de chaque match, ramené à l'échelle des buts.
+
+    Un proxy de tir vit sur une autre échelle que les buts (une dizaine de tirs
+    cadrés pour un ou deux buts). On le remet donc à l'échelle de sorte que sa
+    moyenne sur l'échantillon égale la moyenne des buts : les λ produits restent
+    ainsi des buts, directement comparables d'une variante à l'autre.
+
+    Un match dépourvu de la statistique retombe sur ses buts réels : mieux vaut
+    une observation bruitée qu'un trou dans l'échantillon.
+    """
+    variant = (variant or "goals").lower()
+    if variant not in SIGNAL_VARIANTS:
+        raise ValueError(f"Variante de signal inconnue : {variant}")
+
+    if variant == "goals":
+        return [(float(m.home_goals), float(m.away_goals)) for m in matches]
+
+    if variant == "blend":
+        goals = signal_series(matches, "goals")
+        proxy = signal_series(matches, "shots")
+        w = BLEND_GOALS_WEIGHT
+        return [
+            (w * g[0] + (1 - w) * p[0], w * g[1] + (1 - w) * p[1])
+            for g, p in zip(goals, proxy)
+        ]
+
+    raw: List[Optional[Tuple[float, float]]] = [_raw_signal(m, variant) for m in matches]
+    covered = [value for value in raw if value is not None]
+    if not covered:
+        # Aucune donnée pour cette variante : on retombe entièrement sur les buts.
+        return signal_series(matches, "goals")
+
+    signal_total = sum(home + away for home, away in covered)
+    goal_total = sum(
+        m.home_goals + m.away_goals
+        for m, value in zip(matches, raw) if value is not None
+    )
+    scale = (goal_total / signal_total) if signal_total > 0 else 1.0
+
+    return [
+        (value[0] * scale, value[1] * scale) if value is not None
+        else (float(m.home_goals), float(m.away_goals))
+        for m, value in zip(matches, raw)
+    ]
+
+
+def signal_coverage(matches: Sequence[MatchRecord], variant: str) -> float:
+    """Part des matchs disposant réellement de la statistique demandée."""
+    variant = (variant or "goals").lower()
+    if variant == "goals" or not matches:
+        return 1.0
+    if variant == "blend":
+        return signal_coverage(matches, "shots")
+    covered = sum(1 for m in matches if _raw_signal(m, variant) is not None)
+    return covered / len(matches)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  ESTIMATION DES FORCES D'ÉQUIPE
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -403,28 +523,36 @@ def team_strengths(
     shrinkage: float = DEFAULT_SHRINKAGE,
     iterations: int = 8,
     baseline: Optional[LeagueBaseline] = None,
+    signal: str = "goals",
 ) -> Tuple[Dict[object, TeamStrength], LeagueBaseline]:
     """Forces d'attaque et de défense par équipe.
 
     Ajustement itératif (proportional fitting) d'un modèle
     ``λ = mu · attaque_équipe · défense_adverse · avantage_terrain``.
-    À chaque itération, la force brute (buts réels / buts attendus) est ramenée
+    À chaque itération, la force brute (signal réel / signal attendu) est ramenée
     vers 1.00 proportionnellement à la taille de l'échantillon : une équipe avec
     3 matchs joués reste proche de la moyenne, une équipe avec 30 matchs
     exprime pleinement sa force.
+
+    ``signal`` choisit ce sur quoi la force est mesurée : ``goals`` (l'issue),
+    ``shots`` (les tirs, moins bruités), ``xg``, ou ``blend``. Les repères de la
+    compétition — moyenne de buts et avantage du terrain — restent toujours
+    calculés sur les buts réels : seule l'estimation des forces change.
 
     Retourne (forces, repères de la compétition).
     """
     base = baseline or league_baseline(matches, reference, half_life_days)
     mu, hadv = base.goals_per_team, base.home_advantage
 
+    signals = signal_series(matches, signal)
+
     strengths: Dict[object, TeamStrength] = {}
-    weighted: List[Tuple[MatchRecord, float]] = []
-    for m in matches:
+    weighted: List[Tuple[MatchRecord, float, Tuple[float, float]]] = []
+    for m, values in zip(matches, signals):
         w = recency_weight(m.kickoff, reference, half_life_days)
         if w <= 0:
             continue
-        weighted.append((m, w))
+        weighted.append((m, w, values))
         for team in (m.home, m.away):
             st = strengths.setdefault(team, TeamStrength(team=team))
             st.matches += 1
@@ -454,14 +582,14 @@ def team_strengths(
         exp_for: Dict[object, float] = {t: 0.0 for t in strengths}
         exp_against: Dict[object, float] = {t: 0.0 for t in strengths}
 
-        for m, w in weighted:
+        for m, w, (signal_home, signal_away) in weighted:
             h, a = strengths[m.home], strengths[m.away]
             lam_h = mu * h.attack * a.defense * hadv
             lam_a = mu * a.attack * h.defense / hadv
-            goals_for[m.home] += w * m.home_goals
-            goals_for[m.away] += w * m.away_goals
-            goals_against[m.home] += w * m.away_goals
-            goals_against[m.away] += w * m.home_goals
+            goals_for[m.home] += w * signal_home
+            goals_for[m.away] += w * signal_away
+            goals_against[m.home] += w * signal_away
+            goals_against[m.away] += w * signal_home
             exp_for[m.home] += w * lam_h
             exp_for[m.away] += w * lam_a
             exp_against[m.home] += w * lam_a
@@ -1253,6 +1381,7 @@ def analyse_match(
     home_boost: float = 1.0,
     away_boost: float = 1.0,
     form_window: int = 10,
+    signal: str = "goals",
 ) -> dict:
     """Analyse complète d'une affiche : le point d'entrée du module.
 
@@ -1260,7 +1389,7 @@ def analyse_match(
     marché, forme, Elo, confrontations directes, paris de valeur et verdict.
     """
     strengths, baseline = team_strengths(
-        history, reference=reference, half_life_days=half_life_days
+        history, reference=reference, half_life_days=half_life_days, signal=signal
     )
     home_st = strengths.get(home_team)
     away_st = strengths.get(away_team)
@@ -1288,6 +1417,10 @@ def analyse_match(
 
     return {
         "teams": {"home": home_team, "away": away_team},
+        "signal": {
+            "variant": signal,
+            "coverage": round(signal_coverage(history, signal), 3),
+        },
         "baseline": baseline.as_dict(),
         "strengths": {
             "home": home_st.as_dict() if home_st else None,
