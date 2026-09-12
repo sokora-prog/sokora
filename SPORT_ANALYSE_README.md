@@ -293,7 +293,112 @@ s'ils manquent.
 
 ---
 
-## 6. Alimenter l'outil avec de vraies données
+## 6. Mettre l'application sur son téléphone
+
+`sport-dashboard` est une **application web installable** (PWA) : une fois
+servie en HTTPS, le navigateur propose de l'ajouter à l'écran d'accueil. Elle
+s'ouvre alors en plein écran, avec sa propre icône, sans barre d'adresse — et
+sans passer par un magasin d'applications.
+
+### a) Essai immédiat sur le même Wi-Fi (deux minutes, sans rien déployer)
+
+```bash
+# 1. Le backend doit écouter sur toutes les interfaces, pas seulement localhost
+cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 2. Relever l'adresse locale du poste (ex. 192.168.1.24)
+hostname -I | awk '{print $1}'          # Linux
+ipconfig getifaddr en0                  # macOS
+
+# 3. Pointer l'application vers cette adresse
+cd sport-dashboard
+echo "VITE_API_URL=http://192.168.1.24:8000" > .env.local
+
+# 4. Exposer le serveur de développement sur le réseau
+npm run dev -- --host
+```
+
+Vite affiche alors une adresse `Network:` — ouvrez-la sur le téléphone.
+
+**Limite à connaître** : en HTTP sur une adresse IP, le navigateur **ne
+proposera pas l'installation** (l'écran d'accueil exige HTTPS). C'est un test,
+pas une installation.
+
+### b) L'installer pour de bon (sur le VPS, en HTTPS)
+
+Le nécessaire est déjà en place dans le dépôt :
+
+- `nginx/Dockerfile.nginx` construit `sport-dashboard` et le dépose dans
+  `/usr/share/nginx/html/sport` ;
+- `nginx/conf.d/sokora.conf` le sert sous `/sport/`, avec les bons en-têtes de
+  cache (le service worker n'est jamais mis en cache, pour qu'une correction
+  atteigne toujours les téléphones déjà équipés) ;
+- l'application appelle l'API en chemin relatif `/api`, donc sur la même
+  origine : ni CORS, ni sous-domaine à gérer.
+
+```bash
+# Sur le VPS, à la racine du dépôt
+git pull
+docker compose -f docker-compose.prod.yml build nginx
+docker compose -f docker-compose.prod.yml up -d nginx
+
+# Vérifier la configuration AVANT de recharger si vous modifiez nginx ensuite
+docker compose -f docker-compose.prod.yml exec nginx nginx -t
+```
+
+L'application est alors sur `https://votre-domaine/sport/`.
+
+### c) L'ajouter à l'écran d'accueil
+
+| Téléphone | Marche à suivre |
+|---|---|
+| **Android (Chrome)** | Ouvrir `https://votre-domaine/sport/` → menu ⋮ → **Installer l'application** (ou « Ajouter à l'écran d'accueil »). Une bannière le propose souvent d'elle-même. |
+| **iPhone (Safari)** | Ouvrir la même adresse → bouton **Partager** (carré avec flèche) → **Sur l'écran d'accueil**. iOS n'affiche pas de bannière : il faut passer par ce menu, et **obligatoirement depuis Safari**. |
+
+L'icône apparaît alors comme celle de n'importe quelle application. Au
+lancement, la coquille est servie depuis le cache du téléphone — donc
+instantanée — tandis que **les données sont toujours récupérées sur le réseau**.
+C'est délibéré : un tableau de bord de paris qui afficherait une bankroll ou une
+cote vieilles d'une semaine serait pire qu'inutile. Hors ligne, l'application
+s'ouvre et signale qu'elle ne joint pas l'API, plutôt que d'afficher des
+chiffres faux.
+
+### d) Avant d'exposer quoi que ce soit sur Internet
+
+**Le module n'a aucune authentification.** Mis en ligne tel quel, quiconque
+connaît l'adresse peut lire votre bankroll, vos paris, et en créer. Deux façons
+d'y remédier, par ordre de simplicité :
+
+```nginx
+# Option 1 — mot de passe HTTP, dans le bloc `location /sport/` de nginx
+auth_basic            "SOKORA Sport";
+auth_basic_user_file  /etc/nginx/.htpasswd;
+```
+
+```bash
+# Créer le fichier de mots de passe (sur le VPS)
+htpasswd -c /etc/nginx/.htpasswd votre-nom
+```
+
+Option 2, plus propre à terme : passer le routeur `/sport` derrière
+`get_current_user`, comme les autres routeurs du projet — ce qui suppose de
+gérer un jeton côté application.
+
+Tant que l'une des deux n'est pas en place, mieux vaut garder l'outil sur le
+réseau local.
+
+### e) Régénérer les icônes
+
+```bash
+python3 sport-dashboard/scripts/generate_icons.py
+```
+
+Le script n'utilise que la bibliothèque standard : il écrit les PNG directement,
+sans dépendance à installer.
+
+---
+
+## 7. Alimenter l'outil avec de vraies données
 
 ### La voie rapide : une saison réelle en une commande
 
@@ -379,7 +484,7 @@ demi-saison de championnat.
 
 ---
 
-## 7. Principaux points d'API
+## 8. Principaux points d'API
 
 | Méthode | Chemin | Rôle |
 |---|---|---|
@@ -407,7 +512,7 @@ Paramètres réglables sur l'analyse : `min_edge`, `kelly_fraction`,
 
 ---
 
-## 8. Limites à connaître
+## 9. Limites à connaître
 
 - **Le modèle ignore ce qu'il ne voit pas** : blessures, suspensions, enjeu,
   météo, calendrier européen. Les champs `home_boost` / `away_boost` (1,00 =

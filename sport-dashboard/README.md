@@ -30,6 +30,25 @@ echo "VITE_API_URL=http://localhost:8000" > .env.local
 | Backtest | simulation de la stratégie sur l'historique, sans fuite d'information |
 | Données | import CSV, création de compétitions / matchs, saisie des cotes |
 
+## Sur le téléphone
+
+L'application est installable (PWA) : servie en HTTPS, le navigateur propose de
+l'ajouter à l'écran d'accueil, où elle s'ouvre en plein écran avec sa propre
+icône.
+
+- **Android (Chrome)** : menu ⋮ → *Installer l'application*.
+- **iPhone (Safari)** : bouton *Partager* → *Sur l'écran d'accueil*.
+
+Le service worker met en cache la coquille (HTML, JS, CSS, icônes) pour un
+lancement instantané, mais **jamais les appels à l'API** : des cotes ou une
+bankroll périmées conduiraient à miser sur des chiffres faux.
+
+La marche à suivre complète — essai sur le réseau local, déploiement sur le VPS,
+et la mise en garde sur l'absence d'authentification — est dans
+`SPORT_ANALYSE_README.md`, section 6.
+
+Icônes : `python3 scripts/generate_icons.py` (bibliothèque standard uniquement).
+
 ## Choix de visualisation
 
 - Palette catégorielle validée pour le daltonisme (séparation ΔE contrôlée en
