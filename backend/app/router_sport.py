@@ -2149,7 +2149,11 @@ def _scan_value_bets(
     market_weight: float = 0.35,
     edge_haircut: float = an.DEFAULT_EDGE_HAIRCUT,
     limit: int = 30,
-    only_proven: bool = False,
+    # Actif par défaut, et c'est le point central de l'outil : proposer une mise
+    # sur un marché où le modèle n'a pas démontré qu'il bat la cote de clôture
+    # revient à présenter du bruit comme une opportunité. Il faut demander
+    # explicitement `only_proven=False` pour voir les sélections non étayées.
+    only_proven: bool = True,
     signal: str = "goals",
 ) -> dict:
     """Balaye les matchs à venir disposant de cotes et remonte les sélections
@@ -2285,7 +2289,7 @@ def value_bets(
     edge_haircut: float = Query(an.DEFAULT_EDGE_HAIRCUT, ge=0, le=0.2),
     limit: int = Query(30, ge=1, le=200),
     only_proven: bool = Query(
-        False, description="Ne garder que les poches où le modèle bat le marché"),
+        True, description="Ne garder que les poches où le modèle bat le marché"),
     signal: str = Query("goals"),
     db: Session = Depends(get_db),
 ):
@@ -2591,7 +2595,11 @@ def dashboard(db: Session = Depends(get_db)):
         .limit(10)
         .all()
     )
-    top_value = _scan_value_bets(db, min_edge=DEFAULT_MIN_EDGE, limit=5)
+    # `only_proven` explicite : le tableau de bord affiche le verdict de
+    # réalisme en tête de page. Y lister juste en dessous des sélections dont
+    # l'avantage n'est pas établi contredirait ce verdict sur le même écran.
+    top_value = _scan_value_bets(
+        db, min_edge=DEFAULT_MIN_EDGE, limit=5, only_proven=True)
     realism = _realism_block(db)
 
     return {
@@ -2613,6 +2621,11 @@ def dashboard(db: Session = Depends(get_db)):
         },
         "upcoming_matches": [_match_out(m, names) for m in upcoming],
         "top_value_bets": top_value["opportunities"],
+        # Permet à l'interface de dire *pourquoi* la liste est vide : faute de
+        # cotes saisies, ou parce qu'aucune poche n'est démontrée. Les deux
+        # appellent des gestes très différents.
+        "top_value_note": top_value["filter_note"],
+        "top_value_scanned": top_value["matches_scanned"],
         "recent_bets": [_bet_out(b) for b in recent_bets],
     }
 

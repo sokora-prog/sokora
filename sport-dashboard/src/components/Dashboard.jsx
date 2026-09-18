@@ -186,8 +186,11 @@ export default function Dashboard({ onOpenMatch, onSeeded, onOpenRealism }) {
           </div>
         ) : (
           <div className="empty">
-            Aucune opportunité au-dessus du seuil. Enregistrez des cotes sur vos
-            matchs à venir pour que la comparaison soit possible.
+            {data.top_value_scanned === 0
+              ? <>Aucun match à venir avec des cotes. Enregistrez des cotes sur
+                  vos matchs à venir pour que la comparaison soit possible.</>
+              : data.top_value_note
+                || <>Aucune opportunité au-dessus du seuil.</>}
           </div>
         )}
       </div>
