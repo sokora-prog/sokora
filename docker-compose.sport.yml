@@ -19,6 +19,12 @@ services:
     build: ./backend
     container_name: sokora_sport_api
     restart: unless-stopped
+    # L'image lance uvicorn avec --reload, ce qui convient au développement mais
+    # pas ici : mettre à jour revient à remplacer tout le dossier d'un coup, et
+    # le rechargeur, qui surveille ces mêmes fichiers, redémarre en pleine
+    # écriture — parfois pour ne plus se relever. Le code reste monté, donc une
+    # mise à jour est prise en compte au `restart` : explicite, et sans surprise.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       # Quatre barres obliques : chemin absolu /data/… dans le conteneur.
       DATABASE_URL: sqlite:////data/sokora_sport.db

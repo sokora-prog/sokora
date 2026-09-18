@@ -341,6 +341,19 @@ PostgreSQL n'est pas utilisé ici — pour un outil personnel mono-utilisateur, 
 n'apporte rien et ajoute un conteneur, un mot de passe et une sauvegarde à
 gérer. `docker-compose.yml` reste disponible si le besoin se présente.
 
+**Mettre à jour**, dans cet ordre — arrêter d'abord, remplacer ensuite :
+
+```powershell
+.\start-sport-docker.ps1 -Stop
+# remplacer les fichiers (git pull, ou nouvelle extraction du ZIP)
+.\start-sport-docker.ps1 -Rebuild
+```
+
+Remplacer les fichiers pendant que la pile tourne expose à un backend qui lit son
+propre code au milieu de la réécriture. Les données ne risquent rien : elles sont
+dans un volume Docker, hors du dossier remplacé.
+
+
 ### b) Sans Docker : Python et Node.js
 
 Si Python 3.11+ et Node.js 20+ sont déjà installés, `start-sport-local.ps1`
