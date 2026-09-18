@@ -25,6 +25,33 @@ if (-not $env:ANDROID_HOME -and -not $env:ANDROID_SDK_ROOT) {
     }
 }
 
+# Le plugin Android 8.2 exige Java 17 ou plus. Sans ce contrôle, Gradle échoue
+# sur un message de compatibilité de classe peu parlant. Android Studio embarque
+# le bon JDK : on s'en sert plutôt que d'en faire installer un second.
+$needsJdk = $true
+try {
+    $v = (& java -version 2>&1 | Select-String -Pattern '"(\d+)' ).Matches[0].Groups[1].Value
+    if ([int]$v -ge 17) { $needsJdk = $false }
+    else { Write-Host "Java $v détecté — trop ancien pour Gradle 8.2." -ForegroundColor DarkYellow }
+} catch {
+    Write-Host "Java introuvable dans le PATH." -ForegroundColor DarkYellow
+}
+
+if ($needsJdk) {
+    $jbr = @(
+        "$env:ProgramFiles\Android\Android Studio\jbr",
+        "$env:LOCALAPPDATA\Programs\Android Studio\jbr"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if ($jbr) {
+        $env:JAVA_HOME = $jbr
+        $env:PATH = "$jbr\bin;$env:PATH"
+        Write-Host "JDK d'Android Studio utilisé : $jbr" -ForegroundColor DarkGray
+    } else {
+        Write-Error "Java 17+ requis. Installer Android Studio, ou définir JAVA_HOME sur un JDK 17+."
+    }
+}
+
 # 1. Construire le site. Le même build sert au web et à l'APK : l'adresse de
 #    l'API n'est pas figée ici, elle est saisie dans l'application (onglet
 #    « Connexion »), car elle change avec le réseau.
