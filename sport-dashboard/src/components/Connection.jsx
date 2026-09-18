@@ -96,7 +96,11 @@ export default function Connection({ onConnected }) {
         <ul className="muted" style={{ marginBottom: 0 }}>
           <li>
             Windows : <span className="mono">ipconfig</span> — relever
-            « Adresse IPv4 » de la carte Wi-Fi.
+            « Adresse IPv4 » de la carte <strong>Wi-Fi ou Ethernet</strong>.
+            Ignorer les cartes <span className="mono">vEthernet</span> et les
+            adresses en <span className="mono">172.</span> : ce sont les
+            adaptateurs virtuels de Docker et WSL, injoignables depuis le
+            téléphone.
           </li>
           <li>
             macOS / Linux : <span className="mono">hostname -I</span> ou{' '}

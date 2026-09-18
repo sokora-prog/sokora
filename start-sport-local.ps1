@@ -22,9 +22,13 @@ Write-Host ""
 # --- Adresse de la machine sur le réseau local -------------------------------
 # C'est elle qu'il faudra saisir dans l'application du téléphone : le téléphone
 # ne sait pas ce que « localhost » désigne sur cet ordinateur.
-$ip = (Get-NetIPAddress -AddressFamily IPv4 |
-       Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } |
-       Select-Object -First 1).IPAddress
+# Celle de la carte qui porte la passerelle par défaut : les adaptateurs
+# virtuels de Docker et WSL (vEthernet, 172.x) n'en ont pas, et les retenir
+# enverrait le téléphone vers une adresse injoignable.
+$cfg = Get-NetIPConfiguration |
+       Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } |
+       Select-Object -First 1
+$ip = if ($cfg) { ($cfg.IPv4Address | Select-Object -First 1).IPAddress } else { $null }
 
 # --- Backend -----------------------------------------------------------------
 # DATABASE_URL en SQLite : un simple fichier sokora_sport.db dans backend/.

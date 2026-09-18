@@ -94,16 +94,24 @@ if ($comps -eq '[]') {
     Write-Host "Fait — 10 équipes, matchs joués et matchs à venir cotés." -ForegroundColor Green
 }
 
-$ip = (Get-NetIPAddress -AddressFamily IPv4 |
-       Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } |
-       Select-Object -First 1).IPAddress
+# L'adresse utile est celle de la carte qui porte la passerelle par défaut,
+# c'est-à-dire celle qui sort réellement sur le réseau. Docker Desktop et WSL
+# créent des adaptateurs virtuels (vEthernet, 172.x) sans passerelle : les
+# retenir enverrait le téléphone vers une adresse qu'il ne peut pas joindre.
+$cfg = Get-NetIPConfiguration |
+       Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } |
+       Select-Object -First 1
+$ip = if ($cfg) { ($cfg.IPv4Address | Select-Object -First 1).IPAddress } else { $null }
 
 Write-Host ""
 Write-Host "Prêt." -ForegroundColor Green
 Write-Host "  Sur cet ordinateur  : http://localhost:$PORT_WEB"
 if ($ip) {
-    Write-Host "  Depuis le téléphone : http://${ip}:$PORT_WEB"
+    Write-Host "  Depuis le téléphone : http://${ip}:$PORT_WEB  (carte $($cfg.InterfaceAlias))"
     Write-Host "  Adresse pour l'APK  : http://${ip}:$PORT_API" -ForegroundColor Cyan
+} else {
+    Write-Host "  Adresse réseau non détectée — aucune carte ne porte de passerelle."
+    Write-Host "  Relever « Adresse IPv4 » de la carte Wi-Fi via : ipconfig"
 }
 Write-Host ""
 Write-Host "  Arrêter : .\start-sport-docker.ps1 -Stop"
