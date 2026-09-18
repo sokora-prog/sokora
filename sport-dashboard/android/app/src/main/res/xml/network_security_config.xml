@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Depuis Android 9, une application ne peut plus émettre de requête HTTP en
+  clair sans l'autoriser explicitement. Or le backend tourne ici sur un
+  ordinateur du réseau local, joignable en `http://192.168.x.x:8000` : lui
+  donner un certificat valide supposerait un nom de domaine et une autorité de
+  certification, c'est-à-dire précisément le serveur qu'on ne veut pas louer.
+
+  On autorise donc le trafic en clair. Ce que cela implique, dit franchement :
+  les échanges entre le téléphone et l'ordinateur circulent en clair sur le
+  Wi-Fi, lisibles par qui partage ce réseau. Sur un réseau domestique dont on
+  maîtrise l'accès, c'est le compromis raisonnable. Sur un réseau partagé, il
+  faut soit renoncer, soit définir SPORT_API_TOKEN côté backend — le jeton
+  empêche l'écriture, non la lecture du trafic.
+
+  Pour restreindre l'autorisation à la seule machine utilisée, remplacer
+  `base-config` par un `domain-config` nommant son adresse :
+
+      <domain-config cleartextTrafficPermitted="true">
+          <domain includeSubdomains="false">192.168.1.20</domain>
+      </domain-config>
+
+  C'est plus sûr, mais il faut y revenir à chaque changement d'adresse IP.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

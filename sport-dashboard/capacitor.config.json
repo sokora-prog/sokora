@@ -1,0 +1,11 @@
+{
+  "appId": "com.sokora.sport",
+  "appName": "SOKORA Sport",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

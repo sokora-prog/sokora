@@ -1,8 +1,18 @@
 import axios from 'axios';
+import { getApiBase, getApiToken } from './connection.js';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const api = axios.create();
 
-const api = axios.create({ baseURL: API_URL });
+// L'adresse est résolue à chaque requête, et non à la création du client :
+// changer de serveur depuis l'onglet « Connexion » prend effet immédiatement,
+// sans recharger l'application — ce qui, dans un APK, voudrait dire la fermer
+// et la rouvrir.
+api.interceptors.request.use(config => {
+  config.baseURL = getApiBase();
+  const token = getApiToken();
+  if (token) config.headers['X-Sport-Token'] = token;
+  return config;
+});
 
 /** Message d'erreur lisible, quelle que soit la forme de la réponse FastAPI. */
 export function errorMessage(error) {

@@ -257,6 +257,9 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+Sans `DATABASE_URL`, le backend vise PostgreSQL. Pour une installation locale
+sans base à administrer, SQLite suffit — voir [§ 6a](#a-tout-en-local-sans-postgresql).
+
 Les tables sont créées au démarrage. Sur une base existante, appliquer plutôt :
 
 ```bash
@@ -293,108 +296,174 @@ s'ils manquent.
 
 ---
 
-## 6. Mettre l'application sur son téléphone
+## 6. Tourner en local, et fabriquer l'APK
 
-`sport-dashboard` est une **application web installable** (PWA) : une fois
-servie en HTTPS, le navigateur propose de l'ajouter à l'écran d'accueil. Elle
-s'ouvre alors en plein écran, avec sa propre icône, sans barre d'adresse — et
-sans passer par un magasin d'applications.
+Aucun serveur loué n'est nécessaire. Le montage tient en une phrase : **les
+données restent sur l'ordinateur, l'application s'installe sur le téléphone, et
+les deux se parlent par le Wi-Fi du logement.**
 
-### a) Essai immédiat sur le même Wi-Fi (deux minutes, sans rien déployer)
+### a) Tout en local, sans PostgreSQL
+
+Le backend accepte SQLite : un simple fichier, rien à installer.
 
 ```bash
-# 1. Le backend doit écouter sur toutes les interfaces, pas seulement localhost
-cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
+cd backend
+pip install -r requirements.txt
 
-# 2. Relever l'adresse locale du poste (ex. 192.168.1.24)
-hostname -I | awk '{print $1}'          # Linux
-ipconfig getifaddr en0                  # macOS
+# Windows (PowerShell)
+$env:DATABASE_URL = 'sqlite:///./sokora_sport.db'
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 
-# 3. Pointer l'application vers cette adresse
+# Linux / macOS
+DATABASE_URL="sqlite:///./sokora_sport.db" \
+  uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+`--host 0.0.0.0` n'est pas un détail : sans lui, le backend n'écoute que
+l'ordinateur lui-même et le téléphone ne le verra jamais.
+
+Puis le tableau de bord :
+
+```bash
 cd sport-dashboard
-echo "VITE_API_URL=http://192.168.1.24:8000" > .env.local
-
-# 4. Exposer le serveur de développement sur le réseau
-npm run dev -- --host
+npm install
+npm run dev:lan        # écoute aussi le réseau local, port 5177
 ```
 
-Vite affiche alors une adresse `Network:` — ouvrez-la sur le téléphone.
+Sous Windows, `start-sport-local.ps1` fait les deux d'un coup et affiche
+l'adresse à saisir dans le téléphone :
 
-**Limite à connaître** : en HTTP sur une adresse IP, le navigateur **ne
-proposera pas l'installation** (l'écran d'accueil exige HTTPS). C'est un test,
-pas une installation.
+```powershell
+.\start-sport-local.ps1
+```
 
-### b) L'installer pour de bon (sur le VPS, en HTTPS)
+Le pare-feu doit laisser entrer les ports 8001 et 5177 — c'est déjà le cas si
+`open-firewall.ps1` a été passé une fois.
 
-Le nécessaire est déjà en place dans le dépôt :
-
-- `nginx/Dockerfile.nginx` construit `sport-dashboard` et le dépose dans
-  `/usr/share/nginx/html/sport` ;
-- `nginx/conf.d/sokora.conf` le sert sous `/sport/`, avec les bons en-têtes de
-  cache (le service worker n'est jamais mis en cache, pour qu'une correction
-  atteigne toujours les téléphones déjà équipés) ;
-- l'application appelle l'API en chemin relatif `/api`, donc sur la même
-  origine : ni CORS, ni sous-domaine à gérer.
+Pour repeupler une base neuve :
 
 ```bash
-# Sur le VPS, à la racine du dépôt
-git pull
-docker compose -f docker-compose.prod.yml build nginx
-docker compose -f docker-compose.prod.yml up -d nginx
-
-# Vérifier la configuration AVANT de recharger si vous modifiez nginx ensuite
-docker compose -f docker-compose.prod.yml exec nginx nginx -t
+curl -X POST "http://localhost:8001/sport/seed-demo?matches_per_team=26"
 ```
 
-L'application est alors sur `https://votre-domaine/sport/`.
+### b) Voir l'application sur le téléphone, tout de suite
 
-### c) L'ajouter à l'écran d'accueil
+Sans rien fabriquer : ouvrir `http://<adresse-de-l-ordinateur>:5177` dans le
+navigateur du téléphone, les deux appareils étant sur le même Wi-Fi.
 
-| Téléphone | Marche à suivre |
-|---|---|
-| **Android (Chrome)** | Ouvrir `https://votre-domaine/sport/` → menu ⋮ → **Installer l'application** (ou « Ajouter à l'écran d'accueil »). Une bannière le propose souvent d'elle-même. |
-| **iPhone (Safari)** | Ouvrir la même adresse → bouton **Partager** (carré avec flèche) → **Sur l'écran d'accueil**. iOS n'affiche pas de bannière : il faut passer par ce menu, et **obligatoirement depuis Safari**. |
+C'est un essai, pas une installation : en HTTP sur une adresse IP, le navigateur
+**ne proposera pas** d'ajouter l'application à l'écran d'accueil — l'installation
+d'une PWA exige HTTPS. D'où l'APK.
 
-L'icône apparaît alors comme celle de n'importe quelle application. Au
-lancement, la coquille est servie depuis le cache du téléphone — donc
-instantanée — tandis que **les données sont toujours récupérées sur le réseau**.
-C'est délibéré : un tableau de bord de paris qui afficherait une bankroll ou une
-cote vieilles d'une semaine serait pire qu'inutile. Hors ligne, l'application
-s'ouvre et signale qu'elle ne joint pas l'API, plutôt que d'afficher des
-chiffres faux.
+### c) Fabriquer l'APK
 
-### d) Avant d'exposer quoi que ce soit sur Internet
+L'application est empaquetée avec **Capacitor** : les fichiers du tableau de bord
+sont embarqués dans l'APK et servis localement par le téléphone ; seules les
+données transitent par le réseau. Rien n'est publié sur Internet, aucun magasin
+d'applications n'intervient.
 
-**Le module n'a aucune authentification.** Mis en ligne tel quel, quiconque
-connaît l'adresse peut lire votre bankroll, vos paris, et en créer. Deux façons
-d'y remédier, par ordre de simplicité :
+*Une fois pour toutes* : installer [Android Studio](https://developer.android.com/studio)
+(il fournit le SDK et Java), puis vérifier que `ANDROID_HOME` désigne le SDK —
+typiquement `C:\Users\<vous>\AppData\Local\Android\Sdk`.
 
-```nginx
-# Option 1 — mot de passe HTTP, dans le bloc `location /sport/` de nginx
-auth_basic            "SOKORA Sport";
-auth_basic_user_file  /etc/nginx/.htpasswd;
+*Ensuite, à chaque version* :
+
+```powershell
+cd sport-dashboard
+.\scripts\build-apk.ps1
 ```
 
 ```bash
-# Créer le fichier de mots de passe (sur le VPS)
-htpasswd -c /etc/nginx/.htpasswd votre-nom
+# Linux / macOS
+cd sport-dashboard && ./scripts/build-apk.sh
 ```
 
-Option 2, plus propre à terme : passer le routeur `/sport` derrière
-`get_current_user`, comme les autres routeurs du projet — ce qui suppose de
-gérer un jeton côté application.
+Le script construit le tableau de bord, le recopie dans le projet Android, puis
+compile. L'APK sort dans :
 
-Tant que l'une des deux n'est pas en place, mieux vaut garder l'outil sur le
-réseau local.
+```
+sport-dashboard/android/app/build/outputs/apk/debug/app-debug.apk
+```
 
-### e) Régénérer les icônes
+Le transférer sur le téléphone (câble, messagerie, cloud) et l'ouvrir. Android
+demandera d'autoriser l'installation depuis cette source — c'est normal pour une
+application qui ne vient pas du Play Store.
+
+> L'APK de *débogage* est signé automatiquement et s'installe tel quel : c'est
+> celui qu'il faut pour un usage personnel. L'APK de *release* n'est pas signé et
+> refusera de s'installer sans clé.
+
+### d) Au premier lancement : l'onglet « Connexion »
+
+Une application installée n'a plus d'origine commune avec l'API : `/api` ne
+désigne plus rien, et l'adresse de l'ordinateur change avec le réseau. Elle ne
+peut donc pas être figée à la compilation. L'application s'ouvre par conséquent
+sur **Connexion**, et n'affiche rien d'autre tant qu'aucune adresse n'est
+validée — plutôt que d'empiler des erreurs réseau sans expliquer quoi faire.
+
+1. Relever l'adresse de l'ordinateur : `ipconfig` (Windows) ou `hostname -I`.
+2. Saisir `http://192.168.1.20:8001` — avec le port du backend, pas celui du
+   tableau de bord.
+3. **Tester et enregistrer.** L'adresse est mémorisée ; les lancements suivants
+   ouvrent directement sur la vue d'ensemble.
+
+L'adresse reste modifiable à tout moment depuis le même onglet : c'est utile en
+changeant de réseau, la box attribuant rarement deux fois la même adresse.
+
+Si le test échoue, dans l'ordre : le backend tourne-t-il ? a-t-il été lancé avec
+`--host 0.0.0.0` ? le pare-feu laisse-t-il passer le port 8001 ? les deux
+appareils sont-ils sur le **même** Wi-Fi (attention aux réseaux « invités », qui
+isolent les appareils les uns des autres) ?
+
+### e) Qui peut accéder à ces données
+
+**Le module n'a pas de comptes utilisateur.** Tant que le backend n'écoutait que
+l'ordinateur, cela n'avait aucune conséquence. Dès lors qu'il écoute le réseau
+pour qu'un téléphone l'atteigne, **toute personne connectée au même Wi-Fi peut
+lire la bankroll et modifier les paris**. De plus, les échanges circulent en
+clair : Android l'interdit par défaut, et l'APK lève cette interdiction
+(`android/app/src/main/res/xml/network_security_config.xml`, qui explique le
+compromis et comment le restreindre à une seule adresse).
+
+Sur un réseau domestique dont on maîtrise l'accès, c'est acceptable. Ailleurs —
+bureau, logement partagé, Wi-Fi public — définir un jeton avant de lancer le
+backend :
+
+```powershell
+$env:SPORT_API_TOKEN = 'une-phrase-longue-et-quelconque'
+```
+
+```bash
+SPORT_API_TOKEN="une-phrase-longue-et-quelconque" uvicorn app.main:app --host 0.0.0.0 --port 8001
+```
+
+Le même jeton se saisit dans l'onglet « Connexion ». Toute requête sans lui est
+refusée (401), en lecture comme en écriture. Sans variable définie, rien ne
+change : une installation purement locale n'a pas à subir une authentification
+qu'elle n'a pas demandée.
+
+Le jeton ferme l'accès ; il ne chiffre pas le trafic. Contre un réseau vraiment
+hostile, il faut du HTTPS, donc un nom de domaine — c'est-à-dire le VPS.
+
+### f) Régénérer les icônes
 
 ```bash
 python3 sport-dashboard/scripts/generate_icons.py
 ```
 
 Le script n'utilise que la bibliothèque standard : il écrit les PNG directement,
-sans dépendance à installer.
+sans dépendance à installer. Il produit les icônes web **et** les icônes
+Android (lanceur, variante ronde, calque adaptatif, cinq densités).
+
+### g) Plus tard, sur un VPS
+
+Le nécessaire reste en place dans le dépôt et n'a pas été touché :
+`nginx/Dockerfile.nginx` construit le tableau de bord, `nginx/conf.d/sokora.conf`
+le sert sous `/sport/` sur la même origine que l'API. L'application y retrouve
+son comportement de PWA installable en HTTPS, et l'onglet « Connexion » devient
+inutile : l'adresse compilée (`/api`) suffit. Avant toute mise en ligne, protéger
+le module — `auth_basic` nginx, ou le jeton ci-dessus, ou le routeur derrière
+`get_current_user` comme les autres.
 
 ---
 

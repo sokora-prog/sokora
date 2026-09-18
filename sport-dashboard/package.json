@@ -6,9 +6,15 @@
   "scripts": {
     "dev": "vite --port 5177",
     "build": "vite build",
-    "preview": "vite preview --port 5177"
+    "preview": "vite preview --port 5177",
+    "dev:lan": "vite --port 5177 --host",
+    "apk": "bash scripts/build-apk.sh",
+    "sync:android": "npm run build && npx cap sync android"
   },
   "dependencies": {
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/cli": "^6.2.2",
+    "@capacitor/core": "^6.2.2",
     "axios": "^1.6.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

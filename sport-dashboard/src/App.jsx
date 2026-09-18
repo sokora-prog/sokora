@@ -8,7 +8,9 @@ import DataManager from './components/DataManager.jsx';
 import Backtest from './components/Backtest.jsx';
 import Realism from './components/Realism.jsx';
 import Laboratory from './components/Laboratory.jsx';
+import Connection from './components/Connection.jsx';
 import { sportApi, errorMessage } from './services/api.js';
+import { needsConfiguration } from './services/connection.js';
 
 const TABS = [
   ['dashboard', "Vue d'ensemble"],
@@ -20,12 +22,17 @@ const TABS = [
   ['lab', 'Laboratoire'],
   ['backtest', 'Backtest'],
   ['data', 'Données'],
+  ['connexion', 'Connexion'],
 ];
 
 const THEME_KEY = 'sokora_sport_theme';
 
 export default function App() {
-  const [tab, setTab] = useState('dashboard');
+  // Tant qu'aucune adresse de backend n'est connue — le cas d'un APK
+  // fraîchement installé — toute autre vue afficherait une erreur réseau sans
+  // expliquer quoi faire. On ouvre donc directement sur « Connexion ».
+  const [unconfigured, setUnconfigured] = useState(() => needsConfiguration());
+  const [tab, setTab] = useState(() => (needsConfiguration() ? 'connexion' : 'dashboard'));
   const [competitions, setCompetitions] = useState([]);
   const [teams, setTeams] = useState([]);
   const [matchId, setMatchId] = useState(null);
@@ -42,6 +49,7 @@ export default function App() {
   }, [theme]);
 
   const loadReferences = useCallback(() => {
+    if (needsConfiguration()) return; // rien à interroger : pas encore de serveur
     Promise.all([sportApi.competitions(), sportApi.teams()])
       .then(([c, t]) => { setCompetitions(c.data); setTeams(t.data); setError(null); })
       .catch(e => setError(errorMessage(e)));
@@ -62,7 +70,7 @@ export default function App() {
           </span>
         </div>
         <nav className="tabs" role="tablist" aria-label="Sections">
-          {TABS.map(([key, label]) => (
+          {(unconfigured ? TABS.filter(([key]) => key === 'connexion') : TABS).map(([key, label]) => (
             <button
               key={key} className="tab" role="tab" type="button"
               aria-selected={tab === key} onClick={() => setTab(key)}
@@ -85,21 +93,34 @@ export default function App() {
       </header>
 
       <main className="main">
-        {error && (
+        {unconfigured && (
+          <Connection
+            onConnected={() => {
+              setUnconfigured(false);
+              setTab('dashboard');
+              loadReferences();
+            }}
+          />
+        )}
+
+        {!unconfigured && error && (
           <div className="notice error" style={{ marginBottom: 16 }}>
-            API injoignable : {error}. Vérifiez que le backend tourne et que{' '}
-            <span className="mono">VITE_API_URL</span> pointe dessus.
+            API injoignable : {error}. Vérifiez que le backend tourne, puis
+            contrôlez son adresse dans{' '}
+            <button type="button" className="btn ghost" onClick={() => setTab('connexion')}>
+              Connexion
+            </button>.
           </div>
         )}
 
-        {tab === 'dashboard' && (
+        {!unconfigured && tab === 'dashboard' && (
           <Dashboard
             onOpenMatch={openMatch}
             onSeeded={loadReferences}
             onOpenRealism={() => setTab('realism')}
           />
         )}
-        {tab === 'matches' && (
+        {!unconfigured && tab === 'matches' && (
           <Matches
             competitions={competitions}
             selectedMatchId={matchId}
@@ -107,14 +128,17 @@ export default function App() {
             onChanged={loadReferences}
           />
         )}
-        {tab === 'value' && <ValueBets competitions={competitions} onOpenMatch={openMatch} />}
-        {tab === 'league' && <LeagueTable competitions={competitions} />}
-        {tab === 'bets' && <BetTracker onChanged={loadReferences} />}
-        {tab === 'realism' && <Realism competitions={competitions} />}
-        {tab === 'lab' && <Laboratory competitions={competitions} />}
-        {tab === 'backtest' && <Backtest competitions={competitions} />}
-        {tab === 'data' && (
+        {!unconfigured && tab === 'value' && <ValueBets competitions={competitions} onOpenMatch={openMatch} />}
+        {!unconfigured && tab === 'league' && <LeagueTable competitions={competitions} />}
+        {!unconfigured && tab === 'bets' && <BetTracker onChanged={loadReferences} />}
+        {!unconfigured && tab === 'realism' && <Realism competitions={competitions} />}
+        {!unconfigured && tab === 'lab' && <Laboratory competitions={competitions} />}
+        {!unconfigured && tab === 'backtest' && <Backtest competitions={competitions} />}
+        {!unconfigured && tab === 'data' && (
           <DataManager competitions={competitions} teams={teams} onChanged={loadReferences} />
+        )}
+        {!unconfigured && tab === 'connexion' && (
+          <Connection onConnected={loadReferences} />
         )}
       </main>
 

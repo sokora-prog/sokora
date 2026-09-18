@@ -14,10 +14,12 @@ ne fait que traduire base de données ↔ moteur d'analyse.
 
 import csv
 import io
+import os
+import secrets
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -30,7 +32,26 @@ from .models_sport import (
     OddsQuote, SportBet, SportForecast, SportMatch, SportTeam,
 )
 
-router = APIRouter(prefix="/sport", tags=["sport"])
+#: Jeton partagé, facultatif. Le module n'a pas de comptes utilisateur : tant
+#: qu'il n'écoute que sur la machine locale, c'est sans conséquence. Dès qu'on
+#: l'expose au réseau pour qu'un téléphone l'atteigne, toute personne sur le
+#: même Wi-Fi peut lire la bankroll et modifier les paris. Définir
+#: SPORT_API_TOKEN ferme cette porte sans imposer de gestion de comptes ; laissé
+#: vide (défaut), rien ne change pour une utilisation purement locale.
+SPORT_API_TOKEN = os.getenv("SPORT_API_TOKEN", "").strip()
+
+
+def require_token(x_sport_token: str = Header(default="")) -> None:
+    """Refuse la requête si un jeton est configuré et ne correspond pas."""
+    if not SPORT_API_TOKEN:
+        return
+    # Comparaison à temps constant : une comparaison naïve laisse fuir la
+    # longueur du préfixe correct, ce qui suffit à retrouver le jeton.
+    if not secrets.compare_digest(x_sport_token, SPORT_API_TOKEN):
+        raise HTTPException(status_code=401, detail="Jeton absent ou invalide.")
+
+
+router = APIRouter(prefix="/sport", tags=["sport"], dependencies=[Depends(require_token)])
 
 #: Seuil de valeur en dessous duquel on ne parie pas. 3 % d'edge est un
 #: minimum réaliste : en dessous, l'erreur du modèle dépasse l'avantage.
