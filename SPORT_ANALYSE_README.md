@@ -416,10 +416,22 @@ sont embarqués dans l'APK et servis localement par le téléphone ; seules les
 données transitent par le réseau. Rien n'est publié sur Internet, aucun magasin
 d'applications n'intervient.
 
-*Une fois pour toutes* : installer [Android Studio](https://developer.android.com/studio)
-(il fournit le SDK Android et le JDK), puis vérifier que `ANDROID_HOME` désigne
-le SDK — typiquement `C:\Users\<vous>\AppData\Local\Android\Sdk`. Le script le
-déduit tout seul s'il est à cet endroit.
+*Une fois pour toutes*, trois choses :
+
+1. **Android Studio** (`winget install --id Google.AndroidStudio -e`), **lancé au
+   moins une fois** : l'installeur seul ne télécharge pas le SDK, c'est
+   l'assistant de première configuration qui s'en charge.
+2. **La plateforme Android 34**, celle que vise le projet. L'assistant installe
+   la plus récente, pas celle-là : SDK Manager → onglet *SDK Platforms* →
+   cocher *Android 14 (API 34)*.
+3. **Un JDK 17** : `winget install --id Microsoft.OpenJDK.17 -e`. Le JDK fourni
+   par Android Studio est désormais un Java 25, que le Gradle 8.2 livré avec
+   Capacitor ne sait pas exécuter. Le script cherche un JDK entre 17 et 20 et
+   refuse de démarrer sans, plutôt que d'échouer plus loin sur un message de
+   version de classe.
+
+`ANDROID_HOME` n'a pas à être défini : le script déduit le SDK de son
+emplacement habituel.
 
 *Ensuite, à chaque version* :
 

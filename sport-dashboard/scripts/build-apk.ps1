@@ -4,9 +4,15 @@
 #   .\scripts\build-apk.ps1 -Release   → APK de release (non signé)
 #
 # Prérequis, une seule fois :
-#   • Android Studio installé (il fournit le SDK et Java)
-#   • Variable ANDROID_HOME pointant sur le SDK, typiquement
-#     C:\Users\<vous>\AppData\Local\Android\Sdk
+#   • Android Studio installé, et lancé au moins une fois pour qu'il télécharge
+#     le SDK (l'installeur seul ne le fournit pas)
+#   • la plateforme Android 34, celle que vise le projet : SDK Manager →
+#     onglet « SDK Platforms » → cocher « Android 14 (API 34) »
+#   • un JDK 17 : winget install --id Microsoft.OpenJDK.17 -e
+#     Le JDK fourni par Android Studio est trop récent pour le Gradle du projet.
+#
+# ANDROID_HOME n'a pas à être défini : le script le déduit de l'emplacement
+# habituel du SDK.
 # ============================================================
 
 param(
@@ -31,32 +37,56 @@ if (-not $env:ANDROID_HOME -and -not $env:ANDROID_SDK_ROOT) {
     }
 }
 
-# Le plugin Android 8.2 exige Java 17 ou plus. Sans ce contrôle, Gradle échoue
-# sur un message de compatibilité de classe peu parlant. Android Studio embarque
-# le bon JDK : on s'en sert plutôt que d'en faire installer un second.
-$needsJdk = $true
-try {
-    $v = (& java -version 2>&1 | Select-String -Pattern '"(\d+)' ).Matches[0].Groups[1].Value
-    if ([int]$v -ge 17) { $needsJdk = $false }
-    else { Write-Host "Java $v détecté — trop ancien pour Gradle 8.2." -ForegroundColor DarkYellow }
-} catch {
-    Write-Host "Java introuvable dans le PATH." -ForegroundColor DarkYellow
+# Gradle 8.2.1, la version livrée avec le projet Capacitor, ne sait pas
+# s'exécuter au-delà de Java 20. Or Android Studio embarque désormais un JDK 25 :
+# le prendre parce qu'il est « 17 ou plus » fait échouer le build sur un message
+# de version de classe qui ne dit pas quoi faire. On cherche donc un JDK dans la
+# fenêtre réellement supportée, et on le dit clairement s'il manque.
+$JDK_MIN, $JDK_MAX = 17, 20
+
+function Get-JavaMajor([string]$racine) {
+    $exe = Join-Path $racine 'bin\java.exe'
+    if (-not (Test-Path $exe)) { return 0 }
+    $sortie = & $exe -version 2>&1 | Out-String
+    if ($sortie -match 'version "(\d+)') { return [int]$Matches[1] }
+    return 0
 }
 
-if ($needsJdk) {
-    $jbr = @(
-        "$env:ProgramFiles\Android\Android Studio\jbr",
-        "$env:LOCALAPPDATA\Programs\Android Studio\jbr"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+$candidats = @()
+if ($env:JAVA_HOME) { $candidats += $env:JAVA_HOME }
+$candidats += Get-ChildItem -Directory -ErrorAction SilentlyContinue -Path @(
+    "$env:ProgramFiles\Microsoft",
+    "$env:ProgramFiles\Eclipse Adoptium",
+    "$env:ProgramFiles\Java",
+    "$env:ProgramFiles\Amazon Corretto"
+) | Where-Object { $_.Name -match 'jdk-?(1[789]|20)\b' } | ForEach-Object { $_.FullName }
+# En dernier recours seulement : le JDK d'Android Studio convient tant qu'il
+# reste dans la fenêtre, ce qui n'est plus le cas des versions récentes.
+$candidats += "$env:ProgramFiles\Android\Android Studio\jbr"
+$candidats += "$env:LOCALAPPDATA\Programs\Android Studio\jbr"
 
-    if ($jbr) {
-        $env:JAVA_HOME = $jbr
-        $env:PATH = "$jbr\bin;$env:PATH"
-        Write-Host "JDK d'Android Studio utilisé : $jbr" -ForegroundColor DarkGray
-    } else {
-        Write-Error "Java 17+ requis. Installer Android Studio, ou définir JAVA_HOME sur un JDK 17+."
+$jdk = $null
+foreach ($c in ($candidats | Where-Object { $_ } | Select-Object -Unique)) {
+    $major = Get-JavaMajor $c
+    if ($major -ge $JDK_MIN -and $major -le $JDK_MAX) { $jdk = $c; $jdkMajor = $major; break }
+}
+
+if (-not $jdk) {
+    $vus = foreach ($c in ($candidats | Where-Object { $_ } | Select-Object -Unique)) {
+        $m = Get-JavaMajor $c
+        if ($m -gt 0) { "   Java $m : $c" }
     }
+    Write-Host "Aucun JDK utilisable (il faut Java $JDK_MIN a $JDK_MAX)." -ForegroundColor Red
+    if ($vus) { Write-Host "JDK trouves mais hors fenetre :" -ForegroundColor DarkYellow; $vus | ForEach-Object { Write-Host $_ } }
+    Write-Host ""
+    Write-Host "Installer un JDK 17 :" -ForegroundColor Cyan
+    Write-Host "   winget install --id Microsoft.OpenJDK.17 -e" -ForegroundColor Cyan
+    Write-Error "JDK 17 requis."
 }
+
+$env:JAVA_HOME = $jdk
+$env:PATH = "$jdk\bin;$env:PATH"
+Write-Host "JDK utilise : $jdk (Java $jdkMajor)" -ForegroundColor DarkGray
 
 # 1. Construire le site. Le même build sert au web et à l'APK : l'adresse de
 #    l'API n'est pas figée ici, elle est saisie dans l'application (onglet
