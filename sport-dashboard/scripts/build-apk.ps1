@@ -9,7 +9,13 @@
 #     C:\Users\<vous>\AppData\Local\Android\Sdk
 # ============================================================
 
-param([switch]$Release)
+param(
+    [switch]$Release,
+    # Construit le site dans un conteneur Node plutôt qu'avec le npm du poste.
+    # Évite d'installer Node.js quand Docker est déjà là ; la compilation
+    # Android, elle, reste locale (elle a besoin du SDK).
+    [switch]$UseDocker
+)
 
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $PSScriptRoot   # …\sport-dashboard
@@ -55,14 +61,23 @@ if ($needsJdk) {
 # 1. Construire le site. Le même build sert au web et à l'APK : l'adresse de
 #    l'API n'est pas figée ici, elle est saisie dans l'application (onglet
 #    « Connexion »), car elle change avec le réseau.
-Write-Host "▶ Build du tableau de bord..." -ForegroundColor Yellow
-npm run build
-if ($LASTEXITCODE -ne 0) { Write-Error "Le build a échoué." }
+if ($UseDocker) {
+    Write-Host "▶ Build et synchronisation dans un conteneur Node..." -ForegroundColor Yellow
+    # Le dossier du projet est monté dans le conteneur : dist/ et les fichiers
+    # recopiés dans android/ apparaissent donc bien sur le poste.
+    docker run --rm -v "${here}:/app" -w /app node:20-alpine `
+        sh -c "npm ci && npm run build && npx cap sync android"
+    if ($LASTEXITCODE -ne 0) { Write-Error "Le build en conteneur a échoué." }
+} else {
+    Write-Host "▶ Build du tableau de bord..." -ForegroundColor Yellow
+    npm run build
+    if ($LASTEXITCODE -ne 0) { Write-Error "Le build a échoué. Node.js est-il installé ? Sinon : -UseDocker" }
 
-# 2. Recopier ce build dans le projet Android.
-Write-Host "▶ Synchronisation Capacitor..." -ForegroundColor Yellow
-npx cap sync android
-if ($LASTEXITCODE -ne 0) { Write-Error "La synchronisation a échoué." }
+    # 2. Recopier ce build dans le projet Android.
+    Write-Host "▶ Synchronisation Capacitor..." -ForegroundColor Yellow
+    npx cap sync android
+    if ($LASTEXITCODE -ne 0) { Write-Error "La synchronisation a échoué." }
+}
 
 # 3. Compiler.
 $task = if ($Release) { 'assembleRelease' } else { 'assembleDebug' }

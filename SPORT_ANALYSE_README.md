@@ -258,7 +258,7 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 Sans `DATABASE_URL`, le backend vise PostgreSQL. Pour une installation locale
-sans base à administrer, SQLite suffit — voir [§ 6a](#a-tout-en-local-sans-postgresql).
+sans base à administrer, SQLite suffit — voir [§ 6a](#a-le-plus-simple--docker).
 
 Les tables sont créées au démarrage. Sur une base existante, appliquer plutôt :
 
@@ -302,9 +302,50 @@ Aucun serveur loué n'est nécessaire. Le montage tient en une phrase : **les
 données restent sur l'ordinateur, l'application s'installe sur le téléphone, et
 les deux se parlent par le Wi-Fi du logement.**
 
-### a) Tout en local, sans PostgreSQL
+### a) Le plus simple : Docker
 
-Le backend accepte SQLite : un simple fichier, rien à installer.
+Docker Desktop suffit — ni Python, ni Node.js, ni PostgreSQL à installer.
+
+```powershell
+.\start-sport-docker.ps1
+```
+
+Le script construit les images si nécessaire, attend que l'API réponde, crée un
+championnat de démonstration si la base est vide, puis ouvre le navigateur. Il
+affiche aussi l'adresse du poste sur le réseau, à saisir plus tard dans l'APK.
+
+Sans passer par le script :
+
+```bash
+docker compose -f docker-compose.sport.yml up -d --build
+```
+
+Deux conteneurs, et rien à administrer :
+
+| | rôle |
+|---|---|
+| `api` | FastAPI sur **SQLite** — un fichier dans un volume nommé, conservé entre les redémarrages. Exposé sur le port **8001** pour que le téléphone l'atteigne. |
+| `web` | Le tableau de bord servi par nginx sur le port **5177**, qui relaie `/api` vers `api`. Application et API partagent donc une origine : ni CORS, ni adresse à régler quand le réseau change. |
+
+Commandes utiles :
+
+```powershell
+.\start-sport-docker.ps1 -Logs      # suivre les journaux
+.\start-sport-docker.ps1 -Stop      # arrêter (les données restent)
+.\start-sport-docker.ps1 -Rebuild   # après un git pull qui touche le frontend
+```
+
+Le code du backend est **monté** dans le conteneur : un `git pull` qui ne touche
+que Python est pris en compte au redémarrage du conteneur, sans reconstruction.
+PostgreSQL n'est pas utilisé ici — pour un outil personnel mono-utilisateur, il
+n'apporte rien et ajoute un conteneur, un mot de passe et une sauvegarde à
+gérer. `docker-compose.yml` reste disponible si le besoin se présente.
+
+### b) Sans Docker : Python et Node.js
+
+Si Python 3.11+ et Node.js 20+ sont déjà installés, `start-sport-local.ps1`
+lance les deux services directement. Le détail, si l'on préfère à la main — le
+backend accepte SQLite, un simple fichier, rien à installer :
 
 ```bash
 cd backend
@@ -346,7 +387,7 @@ Pour repeupler une base neuve :
 curl -X POST "http://localhost:8001/sport/seed-demo?matches_per_team=26"
 ```
 
-### b) Voir l'application sur le téléphone, tout de suite
+### c) Voir l'application sur le téléphone, tout de suite
 
 Sans rien fabriquer : ouvrir `http://<adresse-de-l-ordinateur>:5177` dans le
 navigateur du téléphone, les deux appareils étant sur le même Wi-Fi.
@@ -355,7 +396,7 @@ C'est un essai, pas une installation : en HTTP sur une adresse IP, le navigateur
 **ne proposera pas** d'ajouter l'application à l'écran d'accueil — l'installation
 d'une PWA exige HTTPS. D'où l'APK.
 
-### c) Fabriquer l'APK
+### d) Fabriquer l'APK
 
 L'application est empaquetée avec **Capacitor** : les fichiers du tableau de bord
 sont embarqués dans l'APK et servis localement par le téléphone ; seules les
@@ -363,15 +404,22 @@ données transitent par le réseau. Rien n'est publié sur Internet, aucun magas
 d'applications n'intervient.
 
 *Une fois pour toutes* : installer [Android Studio](https://developer.android.com/studio)
-(il fournit le SDK et Java), puis vérifier que `ANDROID_HOME` désigne le SDK —
-typiquement `C:\Users\<vous>\AppData\Local\Android\Sdk`.
+(il fournit le SDK Android et le JDK), puis vérifier que `ANDROID_HOME` désigne
+le SDK — typiquement `C:\Users\<vous>\AppData\Local\Android\Sdk`. Le script le
+déduit tout seul s'il est à cet endroit.
 
 *Ensuite, à chaque version* :
 
 ```powershell
 cd sport-dashboard
-.\scripts\build-apk.ps1
+.\scripts\build-apk.ps1                # si Node.js est installé
+.\scripts\build-apk.ps1 -UseDocker     # sinon : le site est construit dans un conteneur
 ```
+
+`-UseDocker` construit le tableau de bord dans un conteneur Node et dépose le
+résultat dans le projet Android ; seule la compilation Android reste locale,
+puisqu'elle a besoin du SDK. C'est la voie à prendre quand Docker est le seul
+outil installé.
 
 ```bash
 # Linux / macOS
@@ -393,7 +441,7 @@ application qui ne vient pas du Play Store.
 > celui qu'il faut pour un usage personnel. L'APK de *release* n'est pas signé et
 > refusera de s'installer sans clé.
 
-### d) Au premier lancement : l'onglet « Connexion »
+### e) Au premier lancement : l'onglet « Connexion »
 
 Une application installée n'a plus d'origine commune avec l'API : `/api` ne
 désigne plus rien, et l'adresse de l'ordinateur change avec le réseau. Elle ne
@@ -415,7 +463,7 @@ Si le test échoue, dans l'ordre : le backend tourne-t-il ? a-t-il été lancé 
 appareils sont-ils sur le **même** Wi-Fi (attention aux réseaux « invités », qui
 isolent les appareils les uns des autres) ?
 
-### e) Qui peut accéder à ces données
+### f) Qui peut accéder à ces données
 
 **Le module n'a pas de comptes utilisateur.** Tant que le backend n'écoutait que
 l'ordinateur, cela n'avait aucune conséquence. Dès lors qu'il écoute le réseau
@@ -445,7 +493,7 @@ qu'elle n'a pas demandée.
 Le jeton ferme l'accès ; il ne chiffre pas le trafic. Contre un réseau vraiment
 hostile, il faut du HTTPS, donc un nom de domaine — c'est-à-dire le VPS.
 
-### f) Régénérer les icônes
+### g) Régénérer les icônes
 
 ```bash
 python3 sport-dashboard/scripts/generate_icons.py
@@ -455,7 +503,7 @@ Le script n'utilise que la bibliothèque standard : il écrit les PNG directemen
 sans dépendance à installer. Il produit les icônes web **et** les icônes
 Android (lanceur, variante ronde, calque adaptatif, cinq densités).
 
-### g) Plus tard, sur un VPS
+### h) Plus tard, sur un VPS
 
 Le nécessaire reste en place dans le dépôt et n'a pas été touché :
 `nginx/Dockerfile.nginx` construit le tableau de bord, `nginx/conf.d/sokora.conf`

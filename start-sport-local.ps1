@@ -4,6 +4,10 @@
 #
 # Lance le backend sur SQLite (aucune base à installer) et le tableau de bord,
 # tous deux à l'écoute du réseau local pour qu'un téléphone puisse les joindre.
+#
+# EXIGE Python 3.11+ et Node.js 20+ installés sur le poste.
+# Si ce n'est pas le cas, utiliser plutôt `start-sport-docker.ps1`, qui ne
+# demande que Docker Desktop et fournit les deux dans des conteneurs.
 # ============================================================
 
 $ROOT = $PSScriptRoot
