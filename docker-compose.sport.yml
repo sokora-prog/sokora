@@ -1,0 +1,62 @@
+# SOKORA Sport — pile locale complète, sans rien installer d'autre que Docker.
+#
+#   docker compose -f docker-compose.sport.yml up -d --build
+#
+# Deux conteneurs, aucune base de données à administrer :
+#
+#   api  FastAPI sur SQLite. Un seul fichier, dans un volume nommé : il survit
+#        aux redémarrages et aux reconstructions d'image.
+#   web  Le tableau de bord, servi par nginx, qui relaie /api vers `api`.
+#        Application et API partagent donc une origine — ni CORS, ni adresse à
+#        régler quand le réseau change.
+#
+# PostgreSQL n'est pas utilisé ici : pour un outil personnel mono-utilisateur,
+# il n'apporte rien et ajoute un conteneur, un mot de passe et une sauvegarde à
+# gérer. `docker-compose.yml` reste disponible si le besoin se présente.
+
+services:
+  api:
+    build: ./backend
+    container_name: sokora_sport_api
+    restart: unless-stopped
+    # L'image lance uvicorn avec --reload, ce qui convient au développement mais
+    # pas ici : mettre à jour revient à remplacer tout le dossier d'un coup, et
+    # le rechargeur, qui surveille ces mêmes fichiers, redémarre en pleine
+    # écriture — parfois pour ne plus se relever. Le code reste monté, donc une
+    # mise à jour est prise en compte au `restart` : explicite, et sans surprise.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      # Quatre barres obliques : chemin absolu /data/… dans le conteneur.
+      DATABASE_URL: sqlite:////data/sokora_sport.db
+      # Vide par défaut : aucune authentification, ce qui convient tant que la
+      # machine est sur un réseau de confiance. Définir SPORT_API_TOKEN dans
+      # l'environnement avant `docker compose up` pour exiger un jeton.
+      SPORT_API_TOKEN: ${SPORT_API_TOKEN:-}
+      SECRET_KEY: ${SECRET_KEY:-sport-local-only}
+    volumes:
+      - sport_data:/data
+      # Le code est monté : un `git pull` suffit à mettre à jour le backend,
+      # sans reconstruire l'image (uvicorn est lancé avec --reload).
+      - ./backend:/app
+    ports:
+      # Exposé pour que le téléphone (APK) puisse viser directement l'API.
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/sport/competitions')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  web:
+    build: ./sport-dashboard
+    container_name: sokora_sport_web
+    restart: unless-stopped
+    ports:
+      - "5177:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  sport_data:
