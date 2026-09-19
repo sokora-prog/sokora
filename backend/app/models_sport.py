@@ -161,6 +161,16 @@ class SportMatch(Base):
                                back_populates="away_matches")
     odds_quotes = relationship("OddsQuote", back_populates="match",
                                cascade="all, delete-orphan")
+    # Les prévisions gelées suivent le match. Sans cette cascade elles lui
+    # survivaient : la calibration les compte toujours, et un verdict de
+    # réalisme continuait donc de reposer sur des matchs supprimés — une erreur
+    # qui n'apparaît sur aucun écran.
+    forecasts   = relationship("SportForecast", back_populates="match",
+                               cascade="all, delete-orphan")
+    # Les paris, eux, ne sont pas supprimés : `match_id` est volontairement
+    # nullable et la mise a réellement été engagée. Les effacer avec leur
+    # compétition retoucherait la bankroll et le ROI après coup. SQLAlchemy
+    # détache donc le pari (match_id → NULL) et l'historique reste exact.
     bets        = relationship("SportBet", back_populates="match")
 
     __table_args__ = (
@@ -274,7 +284,7 @@ class SportForecast(Base):
     closing_odds = Column(Float, nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
 
-    match = relationship("SportMatch")
+    match = relationship("SportMatch", back_populates="forecasts")
 
     __table_args__ = (
         UniqueConstraint("match_id", "market", "selection", name="uq_sport_forecast"),

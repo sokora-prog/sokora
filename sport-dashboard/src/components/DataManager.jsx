@@ -65,6 +65,29 @@ export default function DataManager({ competitions, teams, onChanged }) {
     } catch (e) { report(null, e); }
   };
 
+  /**
+   * Supprimer une compétition emporte tout ce qui en dépend : équipes, matchs,
+   * cotes, paris et prévisions gelées. Le geste est court, la perte définitive
+   * et la base n'a pas de corbeille — d'où une confirmation qui énonce les
+   * volumes plutôt qu'un « Êtes-vous sûr ? » que personne ne lit.
+   */
+  const removeCompetition = async competition => {
+    const detail = [
+      `${competition.teams_count} équipe(s)`,
+      `${competition.matches_count} match(s)`,
+    ].join(', ');
+    const accepte = window.confirm(
+      `Supprimer « ${competition.name} » ?\n\n`
+      + `Cela effacera ${detail}, ainsi que les cotes, paris et prévisions `
+      + `enregistrés dessus. Cette suppression est définitive.`
+    );
+    if (!accepte) return;
+    try {
+      await sportApi.deleteCompetition(competition.id);
+      report(`« ${competition.name} » supprimée.`);
+    } catch (e) { report(null, e); }
+  };
+
   const runImport = async event => {
     event.preventDefault();
     try {
@@ -227,17 +250,34 @@ export default function DataManager({ competitions, teams, onChanged }) {
                 <table>
                   <thead>
                     <tr>
-                      <th>Compétition</th><th>Saison</th>
-                      <th className="num">Équipes</th><th className="num">Matchs joués</th>
+                      {/* Cette carte occupe une colonne étroite : à cinq
+                          colonnes, le tableau débordait et le bouton d'action
+                          se retrouvait coupé hors de l'écran — donc
+                          introuvable. Saison et effectifs sont regroupés. */}
+                      <th>Compétition</th>
+                      <th className="num">Contenu</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {competitions.map(c => (
                       <tr key={c.id}>
-                        <td>{c.name}</td>
-                        <td>{c.season || '—'}</td>
-                        <td className="num">{c.teams_count}</td>
-                        <td className="num">{c.finished_count} / {c.matches_count}</td>
+                        <td>
+                          {c.name}
+                          {c.season && <div className="small muted">{c.season}</div>}
+                        </td>
+                        <td className="num">
+                          {c.finished_count} / {c.matches_count} matchs
+                          <div className="small muted">{c.teams_count} équipes</div>
+                        </td>
+                        <td>
+                          <button
+                            type="button" className="ghost danger"
+                            onClick={() => removeCompetition(c)}
+                          >
+                            Supprimer
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
