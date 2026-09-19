@@ -227,6 +227,26 @@ après coup.
 Un match déjà commencé ne peut pas fonder une prévision ; une prévision peut être
 supprimée, mais l'API prévient que retirer les ratées revient à se mentir.
 
+**Ce que le gel exige en base.** Deux conditions, souvent absentes au premier
+essai :
+
+1. **Des matchs à venir, avec leurs cotes.** Les fichiers de saison de
+   football-data.co.uk ne contiennent que des rencontres jouées : importer sept
+   saisons ne donne *aucune* affiche à geler. Les matchs à venir vivent dans un
+   fichier séparé, `fixtures.csv`, que `--fixtures` récupère (§ 7).
+2. **Un passé dans la même compétition.** Le modèle évalue les équipes sur
+   l'historique de leur compétition, et une compétition est identifiée par son
+   nom *et* sa saison. Une saison qui vient de s'ouvrir est donc vide : sans au
+   moins 30 rencontres jouées, le gel refuse de travailler plutôt que de figer
+   un tirage au sort. Il faut donc importer les résultats déjà joués de la
+   saison en cours, sous la même compétition que les affiches.
+
+Quand rien n'est gelé, l'API dit laquelle de ces causes s'applique — pas une
+formule passe-partout. Et quand le score arrive ensuite dans le fichier de
+résultats, l'affiche est **complétée** au lieu d'être dupliquée (reconnue à la
+journée près, même si l'heure du coup d'envoi a bougé), ce qui note ses
+prévisions gelées et règle les paris en attente.
+
 ---
 
 ## 4. Architecture
@@ -593,6 +613,47 @@ Codes utiles : `E0` Premier League · `E1` Championship · `F1` Ligue 1 ·
 `B1` Belgique · `T1` Turquie. Le code de saison joint les deux millésimes :
 `2425` = 2024/2025.
 
+### Alimenter le journal : les affiches à venir
+
+Les commandes ci-dessus téléchargent des saisons **jouées**. Le journal de
+prévisions, lui, ne peut travailler que sur des matchs à venir — et c'est la
+seule mesure du projet qu'aucun réglage rétrospectif ne peut flatter. Les
+affiches des prochains jours, cotes comprises, vivent dans un fichier à part :
+
+```bash
+# Toutes les compétitions couvertes par le fichier
+python3 backend/scripts/fetch_football_data.py --fixtures
+
+# Seulement celles qui vous intéressent
+python3 backend/scripts/fetch_football_data.py --fixtures --leagues E0,SP1
+```
+
+Le script répartit les affiches par championnat **et par saison**, déduite de
+leur date, afin qu'elles rejoignent la compétition qui contient déjà
+l'historique. D'où l'ordre à respecter :
+
+```bash
+# 1. les résultats déjà joués de la saison en cours (le passé du modèle)
+python3 backend/scripts/fetch_football_data.py --leagues E0,SP1 2526
+
+# 2. les affiches à venir, avec leurs cotes d'ouverture
+python3 backend/scripts/fetch_football_data.py --fixtures --leagues E0,SP1
+
+# 3. geler les prévisions avant le coup d'envoi
+#    (ou le bouton « Geler les matchs à venir » de l'onglet Laboratoire)
+curl -s -X POST 'http://localhost:8000/sport/forecasts/snapshot' \
+     -H 'Content-Type: application/json' \
+     -d '{"markets":["1X2","OU_2.5"],"signal":"blend"}'
+
+# 4. une fois les matchs joués, réimporter la saison : les scores complètent
+#    les affiches et notent les prévisions gelées
+python3 backend/scripts/fetch_football_data.py --leagues E0,SP1 2526
+```
+
+Répétez les étapes 2 à 4 chaque semaine. Comptez quelques mois pour atteindre
+les 100 prévisions en dessous desquelles le journal refuse de conclure — c'est
+le prix d'une mesure qu'on ne peut pas retoucher.
+
 ### Les cotes importées
 
 | Colonnes du fichier | Ce qui est enregistré |
@@ -619,10 +680,17 @@ L'onglet **Données** accepte n'importe quel CSV, séparateur `,` ou `;` :
 
 | Champ | Colonnes acceptées |
 |---|---|
-| Équipes | `home` / `away`, ou `HomeTeam` / `AwayTeam` |
-| Score | `home_goals` / `away_goals`, ou `FTHG` / `FTAG` |
+| Équipes | `home` / `away`, ou `HomeTeam` / `AwayTeam` — **seules colonnes exigées** |
+| Score | `home_goals` / `away_goals`, ou `FTHG` / `FTAG` — facultatif (voir ci-dessous) |
 | Date | `date`, `kickoff` (formats `2026-08-12`, `12/08/2026`, ISO…) |
+| Heure | `time` (`20:00`), combinée à la date |
 | Bonus | `home_xg`, `away_xg`, `HS`/`AS`, `HST`/`AST`, `HC`/`AC`, `matchday` |
+
+Une ligne **sans score dont le coup d'envoi est encore à venir** devient un match
+programmé : c'est ainsi qu'on saisit des affiches à la main, et c'est le format
+de `fixtures.csv`. Sans score *et* déjà datée d'hier, la ligne est refusée avec
+son numéro : une donnée incomplète n'est pas une affiche, et un match programmé
+qui ne sera jamais joué resterait éternellement en attente dans le journal.
 
 Les équipes inconnues sont créées automatiquement et un même match ne peut pas
 être importé deux fois — le script de téléchargement est donc rejouable sans
@@ -652,7 +720,7 @@ demi-saison de championnat.
 | GET | `/sport/forecasts/scoreboard` | bilan du journal, en conditions réelles |
 | GET | `/sport/competitions/{id}/table` | classement enrichi + forces d'équipe |
 | GET | `/sport/teams/{id}/stats` | fiche d'équipe (forme, domicile/extérieur, Elo) |
-| POST | `/sport/matches/import` | import CSV en masse, **cotes comprises** |
+| POST | `/sport/matches/import` | import CSV en masse, **cotes comprises**, résultats ou affiches à venir |
 | POST | `/sport/matches/{id}/odds` | saisie des cotes |
 | POST | `/sport/bets` · PUT `/sport/bets/{id}/settle` | suivi des paris |
 | PUT | `/sport/matches/{id}/result` | score final + **règlement automatique des paris** |
@@ -690,6 +758,11 @@ Paramètres réglables sur l'analyse : `min_edge`, `kelly_fraction`,
   bruit. Le journal est là pour ça : il note une variante décidée à l'avance.
 - **Le backtest surestime** dès que les cotes historiques manquent ou ont été
   relevées après coup.
+- **Le journal demande de la patience et un peu de discipline.** Il faut
+  importer les affiches à venir, geler, attendre, puis réimporter les résultats
+  — chaque semaine. Rien de tout cela ne peut être rattrapé après coup : une
+  semaine oubliée est une semaine perdue, et c'est précisément ce qui rend la
+  mesure crédible.
 - Un ROI positif sur moins d'une centaine de paris ne prouve rien : c'est le
   domaine de la chance, pas de la compétence. Le CLV répond plus vite.
 

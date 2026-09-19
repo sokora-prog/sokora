@@ -16,7 +16,7 @@ import csv
 import io
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
@@ -279,12 +279,20 @@ class BankrollIn(BaseModel):
 
 
 class ImportIn(BaseModel):
-    """Import CSV de matchs terminés.
+    """Import CSV de matchs, terminés ou à venir.
 
     Colonnes reconnues (insensible à la casse, séparateur ``,`` ou ``;``) :
-        date, home, away, home_goals, away_goals
+        date, time, home, away, home_goals, away_goals
     Alias acceptés : HomeTeam/AwayTeam/FTHG/FTAG (format football-data.co.uk),
     ainsi que home_xg, away_xg, home_shots, away_shots, matchday.
+
+    Seuls ``home`` et ``away`` sont exigés. Une ligne sans score dont le coup
+    d'envoi est encore à venir est importée comme match programmé : c'est le
+    format du fichier ``fixtures.csv`` de football-data.co.uk, et c'est la
+    seule façon d'alimenter le journal de prévisions, qui a besoin de matchs
+    que le modèle n'a pas encore vus. Quand le score arrive ensuite dans le
+    fichier de résultats, le match programmé est complété — pas dupliqué — et
+    ses prévisions gelées sont notées au passage.
     """
     competition_id: Optional[int] = None
     competition_name: Optional[str] = None
@@ -909,6 +917,7 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
 
     aliases = {
         "date": ("date", "kickoff", "datetime", "match_date"),
+        "time": ("time", "heure", "kickoff_time"),
         "home": ("home", "home_team", "hometeam", "domicile", "team_home"),
         "away": ("away", "away_team", "awayteam", "exterieur", "extérieur", "team_away"),
         "home_goals": ("home_goals", "fthg", "hg", "buts_domicile", "home_score"),
@@ -932,13 +941,16 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
         for alias in candidates
         if alias in lowered
     }
-    for required in ("home", "away", "home_goals", "away_goals"):
+    for required in ("home", "away"):
         if required not in mapping:
             raise HTTPException(
                 400,
                 f"Colonne « {required} » absente. Colonnes lues : "
                 f"{', '.join(reader.fieldnames)}",
             )
+    # Le score, lui, est facultatif : `fixtures.csv` (matchs à venir) n'a ni
+    # FTHG ni FTAG, et c'est ce fichier-là qui alimente le journal.
+    has_score_columns = "home_goals" in mapping and "away_goals" in mapping
 
     def parse_number(raw, cast):
         if raw is None or str(raw).strip() == "":
@@ -966,23 +978,44 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
         except ValueError:
             return None
 
+    def parse_kickoff(row):
+        """Date, complétée de l'heure quand le fichier la fournit.
+
+        L'heure compte pour un match à venir : le gel refuse tout coup d'envoi
+        déjà passé, et une rencontre du soir ramenée à minuit serait écartée
+        toute la journée.
+        """
+        moment = parse_date(row.get(mapping["date"])) if "date" in mapping else None
+        if moment is None or "time" not in mapping:
+            return moment
+        raw = (row.get(mapping["time"]) or "").strip()
+        for fmt in ("%H:%M", "%H:%M:%S", "%Hh%M"):
+            try:
+                heure = datetime.strptime(raw, fmt)
+            except ValueError:
+                continue
+            return moment.replace(hour=heure.hour, minute=heure.minute)
+        return moment
+
     bookmakers = tuple(payload.odds_bookmakers or DEFAULT_ODDS_BOOKMAKERS)
     wants_odds = payload.import_odds and bool(
         set(FOOTBALL_DATA_ODDS) & {name.strip() for name in reader.fieldnames}
     )
 
-    created = skipped = 0
+    now = datetime.now(timezone.utc)
+    created = scheduled = skipped = 0
+    completed_matches: List[Tuple[SportMatch, int, int]] = []
     errors: List[str] = []
     pending_odds: List[Tuple[SportMatch, List[dict]]] = []
     for index, row in enumerate(reader, start=2):
         home_name = (row.get(mapping["home"]) or "").strip()
         away_name = (row.get(mapping["away"]) or "").strip()
-        hg = parse_number(row.get(mapping["home_goals"]), int)
-        ag = parse_number(row.get(mapping["away_goals"]), int)
-        if not home_name or not away_name or hg is None or ag is None:
+        hg = parse_number(row.get(mapping["home_goals"]), int) if has_score_columns else None
+        ag = parse_number(row.get(mapping["away_goals"]), int) if has_score_columns else None
+        if not home_name or not away_name:
             skipped += 1
             if len(errors) < 10:
-                errors.append(f"ligne {index} : équipes ou score manquants")
+                errors.append(f"ligne {index} : équipes manquantes")
             continue
 
         home = _resolve_team(db, comp, name=home_name)
@@ -990,7 +1023,21 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
         if home.id == away.id:
             skipped += 1
             continue
-        kickoff = parse_date(row.get(mapping["date"])) if "date" in mapping else None
+        kickoff = parse_kickoff(row)
+
+        # Une ligne sans score n'est un match à venir que si son coup d'envoi
+        # l'est aussi. Sans date, ou datée d'hier, c'est une donnée incomplète
+        # et non une affiche : on le dit plutôt que de fabriquer un match
+        # programmé qui ne sera jamais joué et faussera le gel.
+        is_fixture = hg is None or ag is None
+        if is_fixture and (kickoff is None or kickoff <= now):
+            skipped += 1
+            if len(errors) < 10:
+                errors.append(
+                    f"ligne {index} : score manquant sur un match "
+                    + ("sans date" if kickoff is None else "déjà joué")
+                )
+            continue
 
         # Dédoublonnage : même affiche, même date → on ignore.
         duplicate = (
@@ -1003,15 +1050,48 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
             )
             .first()
         )
-        if duplicate:
-            skipped += 1
-            continue
-
-        match = SportMatch(
-            competition_id=comp.id, home_team_id=home.id, away_team_id=away.id,
-            kickoff=kickoff, status=MatchStatus.FINISHED,
-            home_goals=hg, away_goals=ag,
-        )
+        if duplicate is None and not is_fixture and kickoff is not None:
+            # Le match a pu être importé d'abord comme affiche à venir, avec
+            # une heure annoncée qui a bougé depuis. On le retrouve à la
+            # journée près : sans cela le résultat créerait un doublon et
+            # laisserait les prévisions gelées éternellement en attente.
+            duplicate = (
+                db.query(SportMatch)
+                .filter(
+                    SportMatch.competition_id == comp.id,
+                    SportMatch.home_team_id == home.id,
+                    SportMatch.away_team_id == away.id,
+                    SportMatch.status == MatchStatus.SCHEDULED,
+                    SportMatch.kickoff >= kickoff.replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    ),
+                    SportMatch.kickoff < kickoff.replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    ) + timedelta(days=1),
+                )
+                .first()
+            )
+        if duplicate is not None:
+            if is_fixture or duplicate.status != MatchStatus.SCHEDULED:
+                skipped += 1
+                continue
+            # L'affiche gelée reçoit son score : on complète au lieu de créer.
+            duplicate.status = MatchStatus.FINISHED
+            duplicate.home_goals, duplicate.away_goals = hg, ag
+            completed_matches.append((duplicate, hg, ag))
+            match = duplicate
+        else:
+            match = SportMatch(
+                competition_id=comp.id, home_team_id=home.id, away_team_id=away.id,
+                kickoff=kickoff,
+                status=MatchStatus.SCHEDULED if is_fixture else MatchStatus.FINISHED,
+                home_goals=hg, away_goals=ag,
+            )
+            db.add(match)
+            if is_fixture:
+                scheduled += 1
+            else:
+                created += 1
         for field, cast in (
             ("home_ht_goals", int), ("away_ht_goals", int),
             ("home_xg", float), ("away_xg", float),
@@ -1024,11 +1104,22 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
                 value = parse_number(row.get(mapping[field]), cast)
                 if value is not None:
                     setattr(match, field, value)
-        db.add(match)
-        created += 1
 
         if wants_odds:
             quotes = _extract_row_odds(row, lowered, bookmakers, payload.closing_odds_only)
+            # Une affiche complétée par son résultat a déjà ses cotes
+            # d'ouverture : on n'ajoute que celles qui manquent, sinon la
+            # calibration compterait deux fois la même ligne de marché.
+            if quotes and duplicate is not None:
+                existantes = {
+                    (q.market, q.selection, q.bookmaker, q.is_closing)
+                    for q in match.odds_quotes
+                }
+                quotes = [
+                    q for q in quotes
+                    if (q["market"], q["selection"], q["bookmaker"], q["is_closing"])
+                    not in existantes
+                ]
             if quotes:
                 pending_odds.append((match, quotes))
 
@@ -1052,11 +1143,41 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
                 if quote["is_closing"]:
                     closing_created += 1
 
+    # Une affiche qui reçoit son score ferme la boucle du journal : les
+    # prévisions gelées avant le coup d'envoi sont notées ici, et les paris
+    # encore en attente réglés, comme à la saisie manuelle d'un résultat.
+    resolved_forecasts = settled_bets = 0
+    if completed_matches:
+        # Les cotes de clôture viennent d'être écrites, mais la collection du
+        # match a été chargée avant : sans cette péremption, la notation lirait
+        # les cotes d'ouverture de l'affiche et les enregistrerait comme cotes
+        # de clôture. Le journal mesurerait alors son CLV contre la mauvaise
+        # ligne, sans que rien ne le signale.
+        db.flush()
+        for match, _, _ in completed_matches:
+            db.expire(match, ["odds_quotes"])
+    for match, hg, ag in completed_matches:
+        resolved_forecasts += _resolve_forecasts(db, match, hg, ag)
+        for bet in match.bets:
+            if bet.status != BetStatus.PENDING:
+                continue
+            verdict = an.settle_selection(bet.market, bet.selection, hg, ag)
+            if verdict is None:
+                continue
+            bet.status = BetStatus(verdict)
+            bet.profit = round(_bet_record(bet).net_profit(), 2)
+            bet.settled_at = datetime.now(timezone.utc)
+            settled_bets += 1
+
     db.commit()
     return {
         "competition_id": comp.id,
         "competition": comp.name,
         "created": created,
+        "scheduled_created": scheduled,
+        "completed_from_scheduled": len(completed_matches),
+        "resolved_forecasts": resolved_forecasts,
+        "settled_bets": settled_bets,
         "skipped": skipped,
         "errors": errors,
         "teams_total": db.query(SportTeam).filter(SportTeam.competition_id == comp.id).count(),
@@ -1069,6 +1190,15 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
             if closing_created else
             "Aucune cote de clôture dans ce fichier — la calibration restera "
             "sans barre à franchir."
+        ),
+        "schedule_note": (
+            f"{scheduled} match(s) à venir enregistré(s) : le journal de "
+            "prévisions a de quoi travailler."
+            if scheduled else
+            "Ce fichier ne contient que des matchs joués. Le journal de "
+            "prévisions, lui, a besoin de rencontres à venir : importez "
+            "fixtures.csv (football-data.co.uk) ou saisissez les affiches "
+            "à la main."
         ),
     }
 
@@ -1649,6 +1779,8 @@ class SnapshotIn(BaseModel):
     signal: str = "goals"
     market_weight: float = 0.0   # 0 = avis du modèle seul, ce qui est l'objet du test
     max_matches: int = 100
+    #: Matchs joués exigés dans la compétition avant de geler quoi que ce soit.
+    min_history: int = 30
 
 
 @router.post("/forecasts/snapshot", status_code=201)
@@ -1670,6 +1802,7 @@ def snapshot_forecasts(payload: SnapshotIn, db: Session = Depends(get_db)):
     query = db.query(SportMatch).filter(SportMatch.status == MatchStatus.SCHEDULED)
     if payload.competition_id:
         query = query.filter(SportMatch.competition_id == payload.competition_id)
+    scheduled_total = query.count()
     matches = query.order_by(SportMatch.kickoff).limit(payload.max_matches).all()
 
     existing = {
@@ -1681,7 +1814,7 @@ def snapshot_forecasts(payload: SnapshotIn, db: Session = Depends(get_db)):
 
     history_cache: Dict[int, List[an.MatchRecord]] = {}
     created = 0
-    skipped_no_odds = skipped_started = skipped_existing = 0
+    skipped_no_odds = skipped_started = skipped_existing = skipped_history = 0
     covered_matches = set()
 
     for match in matches:
@@ -1702,6 +1835,15 @@ def snapshot_forecasts(payload: SnapshotIn, db: Session = Depends(get_db)):
         if match.competition_id not in history_cache:
             history_cache[match.competition_id] = _history(db, match.competition_id)
         history = history_cache[match.competition_id]
+
+        # Sans passé, le modèle donne toutes les équipes pour égales : ce n'est
+        # pas une prévision, c'est un tirage. Une telle ligne gelée ne s'effacerait
+        # plus jamais du journal et fausserait son verdict à perpétuité. Le cas est
+        # courant — une saison qui vient de s'ouvrir est une compétition neuve,
+        # donc vide.
+        if len(history) < payload.min_history:
+            skipped_history += 1
+            continue
 
         strengths, baseline = an.team_strengths(
             history, reference=kickoff, signal=payload.signal
@@ -1752,21 +1894,67 @@ def snapshot_forecasts(payload: SnapshotIn, db: Session = Depends(get_db)):
                 covered_matches.add(match.id)
 
     db.commit()
+
+    # Un gel qui ne gèle rien doit dire pourquoi. Le cas de loin le plus
+    # fréquent n'est ni « déjà couvert » ni « sans cotes » : c'est une base qui
+    # ne contient aucun match à venir, parce que les fichiers de résultats de
+    # football-data.co.uk n'en contiennent pas. Nommer la vraie cause est le
+    # minimum ; laisser croire au succès serait exactement le travers que ce
+    # module est censé combattre.
+    if created:
+        note = (
+            "Ces prévisions sont désormais figées. Elles seront notées "
+            "automatiquement à la saisie des scores, et le tableau de bord du "
+            "journal dira, sans complaisance possible, si le modèle bat le marché."
+        )
+    elif scheduled_total == 0:
+        note = (
+            "Rien n'a été gelé : la base ne contient aucun match à venir. Les "
+            "saisons importées depuis football-data.co.uk ne comportent que des "
+            "rencontres jouées. Importez fixtures.csv, ou saisissez les affiches "
+            "à venir, puis relancez le gel."
+        )
+    elif skipped_history and not skipped_existing and not skipped_no_odds:
+        note = (
+            f"Rien n'a été gelé : les {skipped_history} match(s) à venir "
+            "appartiennent à une compétition qui compte moins de "
+            f"{payload.min_history} rencontres jouées. Sans passé, le modèle "
+            "donnerait toutes les équipes pour égales, et une prévision gelée ne "
+            "se corrige jamais. Importez les résultats déjà joués de la saison en "
+            "cours sous la même compétition, puis relancez le gel."
+        )
+    elif skipped_no_odds and not skipped_existing:
+        note = (
+            f"Rien n'a été gelé : les {skipped_no_odds} match(s) à venir n'ont "
+            "aucune cote enregistrée. Sans cote, il n'y a pas de marché à "
+            "battre, donc rien à mesurer."
+        )
+    elif skipped_existing and not skipped_no_odds:
+        note = (
+            "Rien de nouveau : les prévisions de ces matchs sont déjà gelées. "
+            "Elles ne sont jamais réécrites, même si le modèle a changé d'avis."
+        )
+    else:
+        note = (
+            f"Rien n'a été gelé sur {scheduled_total} match(s) à venir : "
+            f"{skipped_existing} déjà gelé(s), {skipped_no_odds} sans cote, "
+            f"{skipped_started} déjà commencé(s), {skipped_history} sans "
+            "historique suffisant."
+        )
+
     return {
         "created": created,
         "matches_covered": len(covered_matches),
+        "scheduled_total": scheduled_total,
         "skipped": {
             "already_frozen": skipped_existing,
             "no_odds": skipped_no_odds,
             "already_started": skipped_started,
+            "not_enough_history": skipped_history,
         },
         "signal": payload.signal,
         "markets": payload.markets,
-        "note": (
-            "Ces prévisions sont désormais figées. Elles seront notées "
-            "automatiquement à la saisie des scores, et le tableau de bord du "
-            "journal dira, sans complaisance possible, si le modèle bat le marché."
-        ),
+        "note": note,
     }
 
 

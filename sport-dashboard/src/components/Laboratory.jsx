@@ -131,12 +131,13 @@ export default function Laboratory({ competitions }) {
       };
       if (params.competition_id) body.competition_id = Number(params.competition_id);
       const r = await sportApi.snapshotForecasts(body);
+      // Quand rien n'est gelé, l'API dit laquelle des causes possibles s'applique
+      // réellement ; l'inventer ici reviendrait à annoncer au hasard.
       setFlash(
         r.data.created
           ? `${r.data.created} prévisions gelées sur ${r.data.matches_covered} match(s). `
             + 'Elles seront notées automatiquement à la saisie des scores.'
-          : "Aucune nouvelle prévision : les matchs à venir sont déjà couverts, "
-            + "ou n'ont pas de cotes enregistrées."
+          : r.data.note
       );
       loadJournal();
     } catch (e) {
@@ -347,7 +348,10 @@ export default function Laboratory({ competitions }) {
             <div className="notice" style={{ marginTop: 14 }}>
               {board.frozen_total === 0
                 ? "Le journal est vide. Gelez les prévisions des matchs à venir : "
-                  + "c'est la seule mesure qu'aucun réglage rétrospectif ne peut flatter."
+                  + "c'est la seule mesure qu'aucun réglage rétrospectif ne peut flatter. "
+                  + "Il faut pour cela des rencontres à venir dans la base : les saisons "
+                  + "de football-data.co.uk ne contiennent que des matchs joués, seul "
+                  + "fixtures.csv apporte les affiches à venir avec leurs cotes."
                 : board.resolved === 0
                   ? `${board.pending} prévision(s) en attente : le verdict viendra quand `
                     + 'ces matchs auront été joués et leurs scores saisis. Rien à conclure '

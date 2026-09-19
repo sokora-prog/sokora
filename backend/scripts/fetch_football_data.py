@@ -21,6 +21,12 @@ Usage :
     # Sans importer, pour inspecter les fichiers d'abord
     python3 backend/scripts/fetch_football_data.py E0 2425 --out ./data --no-import
 
+    # Les affiches à venir, avec leurs cotes — ce que le journal de prévisions
+    # réclame : les fichiers de saison ci-dessus ne contiennent que des matchs
+    # déjà joués, sur lesquels rien ne peut être gelé.
+    python3 backend/scripts/fetch_football_data.py --fixtures
+    python3 backend/scripts/fetch_football_data.py --fixtures --leagues E0,SP1
+
 Codes de championnat les plus courants :
 
     E0  Premier League       E1  Championship      SC0 Écosse Premiership
@@ -36,13 +42,19 @@ statistiques et colonnes de cotes, ouverture comme clôture).
 """
 
 import argparse
+import csv
+import io
 import json
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
+#: Un seul fichier pour tous les championnats : la colonne Div les distingue.
+FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
 DEFAULT_API = "http://localhost:8000"
 
 LEAGUE_NAMES = {
@@ -78,6 +90,64 @@ def download(league: str, season: str, timeout: int = 60) -> str:
     return raw.decode("latin-1", errors="replace").strip()
 
 
+def download_url(url: str, timeout: int = 60) -> str:
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "sokora-sport/1.0 (analyse personnelle)"}
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read()
+    return raw.decode("latin-1", errors="replace").strip()
+
+
+def season_from_date(raw: str) -> str:
+    """« 27/09/2025 » → « 2025/2026 ».
+
+    La saison d'une affiche doit être exactement celle de l'historique déjà
+    importé : sans cela le match à venir atterrit dans une compétition à part,
+    sans une seule rencontre passée, et le modèle n'a rien pour l'évaluer.
+    """
+    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
+        try:
+            jour = datetime.strptime(raw.strip(), fmt)
+        except ValueError:
+            continue
+        début = jour.year if jour.month >= 7 else jour.year - 1
+        return f"{début}/{début + 1}"
+    raise ValueError(f"date illisible : {raw!r}")
+
+
+def split_fixtures(csv_text: str) -> Dict[Tuple[str, str], str]:
+    """Éclate fixtures.csv en un CSV par (championnat, saison)."""
+    reader = csv.DictReader(io.StringIO(csv_text))
+    if not reader.fieldnames:
+        raise ValueError("en-tête de fixtures.csv illisible")
+    colonnes = {(n or "").strip().lower(): n for n in reader.fieldnames}
+    for requise in ("div", "date"):
+        if requise not in colonnes:
+            raise ValueError(f"colonne « {requise} » absente de fixtures.csv")
+
+    groupes: Dict[Tuple[str, str], List[dict]] = {}
+    for ligne in reader:
+        div = (ligne.get(colonnes["div"]) or "").strip().upper()
+        brute = (ligne.get(colonnes["date"]) or "").strip()
+        if not div or not brute:
+            continue
+        try:
+            saison = season_from_date(brute)
+        except ValueError:
+            continue
+        groupes.setdefault((div, saison), []).append(ligne)
+
+    sorties: Dict[Tuple[str, str], str] = {}
+    for clé, lignes in groupes.items():
+        tampon = io.StringIO()
+        writer = csv.DictWriter(tampon, fieldnames=reader.fieldnames)
+        writer.writeheader()
+        writer.writerows(lignes)
+        sorties[clé] = tampon.getvalue()
+    return sorties
+
+
 def post_import(api: str, payload: dict, timeout: int = 300) -> dict:
     request = urllib.request.Request(
         f"{api.rstrip('/')}/sport/matches/import",
@@ -87,6 +157,108 @@ def post_import(api: str, payload: dict, timeout: int = 300) -> dict:
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
+
+
+def fetch_fixtures(args, leagues: List[str], out_dir) -> int:
+    """Importe les affiches à venir, avec leurs cotes.
+
+    C'est la pièce qui manquait au journal de prévisions : les fichiers de
+    saison ne contiennent que des matchs joués, donc un gel lancé sur eux seuls
+    ne peut rien geler. Ici, chaque affiche arrive avec ses cotes d'ouverture,
+    ce qui donne au modèle un marché à contredire avant le coup d'envoi.
+    """
+    print("→ affiches à venir (fixtures.csv)…", flush=True)
+    try:
+        csv_text = download_url(FIXTURES_URL)
+    except urllib.error.HTTPError as error:
+        print(f"   échec du téléchargement : HTTP {error.code}")
+        return 1
+    except Exception as error:
+        print(f"   échec du téléchargement : {error}")
+        return 1
+
+    if out_dir:
+        chemin = out_dir / "fixtures.csv"
+        chemin.write_text(csv_text, encoding="utf-8")
+        print(f"   enregistré dans {chemin}")
+
+    try:
+        groupes = split_fixtures(csv_text)
+    except ValueError as error:
+        print(f"   fichier illisible : {error}")
+        return 1
+
+    demandés = set(leagues) if args.leagues else None
+    retenus = {
+        clé: texte for clé, texte in sorted(groupes.items())
+        if demandés is None or clé[0] in demandés
+    }
+    if not retenus:
+        print("   aucune affiche pour ces championnats — le fichier ne couvre "
+              "que les rencontres des prochains jours.")
+        return 0
+
+    if args.no_import:
+        for (div, saison), texte in retenus.items():
+            affiches = texte.count("\n") - 1
+            print(f"   {LEAGUE_NAMES.get(div, div)} {saison} : {affiches} affiches")
+        return 0
+
+    total = total_odds = 0
+    échecs = []
+    for (div, saison), texte in retenus.items():
+        nom = LEAGUE_NAMES.get(div, div)
+        payload = {
+            "competition_name": nom,
+            "season": saison,
+            "csv_text": texte,
+            "import_odds": True,
+            "closing_odds_only": args.closing_only,
+            "odds_bookmakers": [
+                book.strip() for book in args.bookmakers.split(",") if book.strip()
+            ],
+        }
+        try:
+            result = post_import(args.api, payload)
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")[:300]
+            print(f"   {nom} {saison} : échec HTTP {error.code} — {detail}")
+            échecs.append(f"{div}/{saison}")
+            continue
+        except Exception as error:
+            print(f"   {nom} {saison} : échec — {error}")
+            print(f"   (l'API répond-elle sur {args.api} ?)")
+            échecs.append(f"{div}/{saison}")
+            continue
+
+        à_venir = result.get("scheduled_created", 0)
+        total += à_venir
+        total_odds += result.get("odds_created", 0)
+        print(
+            f"   {nom} {saison} : {à_venir} affiche(s) à venir, "
+            f"{result.get('created', 0)} déjà jouée(s), "
+            f"{result['skipped']} ignorée(s) · "
+            f"{result.get('odds_created', 0)} cotes"
+        )
+        if result.get("completed_from_scheduled"):
+            print(f"      {result['completed_from_scheduled']} affiche(s) complétée(s), "
+                  f"{result.get('resolved_forecasts', 0)} prévision(s) notée(s)")
+
+    print()
+    print(f"Total : {total} matchs à venir, {total_odds} cotes.")
+    if échecs:
+        print("Échecs :", ", ".join(échecs))
+    if total:
+        print()
+        print("Étape suivante — geler les prévisions avant le coup d'envoi :")
+        print(f"  curl -s -X POST '{args.api}/sport/forecasts/snapshot' \\")
+        print("       -H 'Content-Type: application/json' \\")
+        print('       -d \'{"markets":["1X2","OU_2.5"],"signal":"blend"}\'')
+        print("  ou le bouton « Geler les matchs à venir » de l'onglet « Laboratoire ».")
+        print()
+        print("Réimportez ensuite le fichier de saison une fois les matchs joués :")
+        print("  les scores complètent les affiches et notent les prévisions gelées.")
+    return 1 if échecs and not total else 0
 
 
 def main() -> int:
@@ -108,6 +280,9 @@ def main() -> int:
                         help="N'importer que les cotes de clôture")
     parser.add_argument("--bookmakers", default="Pinnacle,Moyenne,Meilleure",
                         help="Bookmakers à importer, séparés par des virgules")
+    parser.add_argument("--fixtures", action="store_true",
+                        help="Importer les affiches à venir (fixtures.csv) "
+                             "au lieu des saisons passées")
     args = parser.parse_args()
 
     leagues = (
@@ -121,6 +296,9 @@ def main() -> int:
 
     total_matches = total_odds = total_closing = 0
     failures = []
+
+    if args.fixtures:
+        return fetch_fixtures(args, leagues, out_dir)
 
     for league in leagues:
         name = LEAGUE_NAMES.get(league, league)
