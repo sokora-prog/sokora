@@ -466,6 +466,15 @@ application qui ne vient pas du Play Store.
 > celui qu'il faut pour un usage personnel. L'APK de *release* n'est pas signé et
 > refusera de s'installer sans clé.
 
+**Combinaison vérifiée** — Windows 11, Docker Desktop, Android Studio avec SDK
+API 34 et 37, JDK 17 (Temurin) pour Gradle, build du site en conteneur Node.
+APK de 3,6 Mo produit, installé, connecté à l'API du poste sur le réseau local.
+
+Le piège à connaître : Android Studio fournit désormais un JDK 25, que le Gradle
+8.2 livré avec Capacitor ne sait pas exécuter — d'où le JDK 17 en prérequis. Le
+script s'arrête avec un message explicite plutôt que de laisser Gradle échouer
+sur une erreur de version de classe.
+
 ### e) Au premier lancement : l'onglet « Connexion »
 
 Une application installée n'a plus d'origine commune avec l'API : `/api` ne
