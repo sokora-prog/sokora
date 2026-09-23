@@ -1003,7 +1003,7 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
     )
 
     now = datetime.now(timezone.utc)
-    created = scheduled = skipped = 0
+    created = scheduled = skipped = enriched = 0
     completed_matches: List[Tuple[SportMatch, int, int]] = []
     errors: List[str] = []
     pending_odds: List[Tuple[SportMatch, List[dict]]] = []
@@ -1071,14 +1071,35 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
                 )
                 .first()
             )
+        enriching = False
         if duplicate is not None:
-            if is_fixture or duplicate.status != MatchStatus.SCHEDULED:
+            if is_fixture:
                 skipped += 1
                 continue
-            # L'affiche gelée reçoit son score : on complète au lieu de créer.
-            duplicate.status = MatchStatus.FINISHED
-            duplicate.home_goals, duplicate.away_goals = hg, ag
-            completed_matches.append((duplicate, hg, ag))
+            if duplicate.status == MatchStatus.SCHEDULED:
+                # L'affiche gelée reçoit son score : on complète au lieu de créer.
+                duplicate.status = MatchStatus.FINISHED
+                duplicate.home_goals, duplicate.away_goals = hg, ag
+                completed_matches.append((duplicate, hg, ag))
+            else:
+                # Le match est déjà enregistré, mais une seconde source peut
+                # apporter ce que la première n'avait pas — typiquement le xG,
+                # que football-data.co.uk ne publie pas. Sans cela ces colonnes
+                # seraient rejetées en silence, et la couverture annoncée par le
+                # script d'import ne correspondrait à rien en base.
+                enriching = True
+                # Le score, lui, ne s'enrichit pas : il ancre le dédoublonnage et
+                # la notation des prévisions. Deux sources qui ne disent pas la
+                # même chose est une information en soi — la taire reviendrait à
+                # trancher au hasard, selon l'ordre des imports.
+                if (duplicate.home_goals, duplicate.away_goals) != (hg, ag):
+                    if len(errors) < 10:
+                        errors.append(
+                            f"ligne {index} : score divergent pour "
+                            f"{home_name}–{away_name} "
+                            f"({duplicate.home_goals}-{duplicate.away_goals} en base, "
+                            f"{hg}-{ag} dans ce fichier) — celui en base est conservé"
+                        )
             match = duplicate
         else:
             match = SportMatch(
@@ -1092,6 +1113,7 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
                 scheduled += 1
             else:
                 created += 1
+        comblés: List[str] = []
         for field, cast in (
             ("home_ht_goals", int), ("away_ht_goals", int),
             ("home_xg", float), ("away_xg", float),
@@ -1102,8 +1124,24 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
         ):
             if field in mapping:
                 value = parse_number(row.get(mapping[field]), cast)
-                if value is not None:
-                    setattr(match, field, value)
+                if value is None:
+                    continue
+                # En enrichissement, on ne comble que les trous : réécrire une
+                # valeur déjà en base laisserait la dernière source importée
+                # refaire l'histoire sans qu'on puisse savoir laquelle a parlé.
+                if enriching and getattr(match, field, None) is not None:
+                    continue
+                setattr(match, field, value)
+                comblés.append(field)
+
+        if enriching:
+            # On compte ce que cette ligne a réellement apporté, et non l'état
+            # de la session : un même match répété deux fois dans un fichier
+            # serait sinon compté deux fois comme un apport.
+            if comblés:
+                enriched += 1
+            else:
+                skipped += 1
 
         if wants_odds:
             quotes = _extract_row_odds(row, lowered, bookmakers, payload.closing_odds_only)
@@ -1175,6 +1213,7 @@ def import_matches(payload: ImportIn, db: Session = Depends(get_db)):
         "competition": comp.name,
         "created": created,
         "scheduled_created": scheduled,
+        "enriched": enriched,
         "completed_from_scheduled": len(completed_matches),
         "resolved_forecasts": resolved_forecasts,
         "settled_bets": settled_bets,

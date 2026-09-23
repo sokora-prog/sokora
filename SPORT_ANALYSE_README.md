@@ -654,6 +654,81 @@ Répétez les étapes 2 à 4 chaque semaine. Comptez quelques mois pour atteindr
 les 100 prévisions en dessous desquelles le journal refuse de conclure — c'est
 le prix d'une mesure qu'on ne peut pas retoucher.
 
+### La deuxième source : API-Football, pour le xG
+
+football-data.co.uk ne publie pas de buts attendus. La variante « xG » du banc
+d'essai affiche donc **0 % de couverture** et retombe silencieusement sur les
+buts : elle ne mesure rien. API-Football est le seul agrégateur dont le palier
+gratuit porte à la fois des statistiques de match (xG, tirs cadrés) et des
+cotes.
+
+```bash
+# La clé ne vit jamais dans le dépôt
+$env:API_FOOTBALL_KEY="votre-clé"        # PowerShell
+export API_FOOTBALL_KEY=votre-clé        # bash
+
+python3 backend/scripts/fetch_api_football.py --status                  # offre et quota
+python3 backend/scripts/fetch_api_football.py --find-league "Premier League"
+python3 backend/scripts/fetch_api_football.py --league 39 --season 2025 --stats 60
+```
+
+**Les deux sources se complètent, elles ne se remplacent pas.** Le banc d'essai
+confronte le modèle à la **cote de clôture**, que football-data.co.uk fournit et
+qu'API-Football ne restitue pas sur un match joué. Le xG, lui, ne vient que
+d'API-Football. Il faut donc les deux, **sur les mêmes matchs** :
+
+```bash
+# 1. les résultats et les cotes de clôture
+python3 backend/scripts/fetch_football_data.py --leagues E0 2526
+# 2. le xG et les tirs, versés sur ces mêmes matchs
+python3 backend/scripts/fetch_api_football.py --league 39 --season 2025 --stats 80
+```
+
+Le second import ne crée rien : il **complète** les matchs déjà connus, sans
+jamais réécrire une valeur que la première source avait donnée. S'il rencontre
+un score différent de celui en base, il conserve celui en base et le signale
+plutôt que de trancher selon l'ordre des imports.
+
+#### Trois choses à savoir avant de lancer
+
+**Les noms d'équipe peuvent couper votre historique en deux.** L'application
+apparie les équipes sur leur nom **exact**. « Manchester City » d'API-Football
+et « Man City » de football-data.co.uk deviendraient deux équipes distinctes
+dans la même compétition, chacune avec la moitié des matchs — et rien à l'écran
+ne le dirait. Le script compare donc les noms entrants à ceux déjà en base,
+**s'arrête** au premier qui ne correspond pas, et écrit un brouillon de
+correspondances à relire :
+
+```bash
+python3 backend/scripts/fetch_api_football.py --league 39 --season 2025 \
+        --aliases api_football_aliases.json
+```
+
+**Le palier gratuit se compte en dizaines de requêtes par jour**, et les
+statistiques comme les cotes se demandent **un match à la fois** : une saison de
+380 rencontres coûte plusieurs jours de quota. D'où `--budget` (le travail
+s'arrête proprement) et un cache sur disque : une réponse déjà obtenue ne coûte
+plus rien, et la même commande relancée le lendemain reprend où elle s'était
+arrêtée.
+
+**« HTTP 200 » ne veut pas dire « des données ».** Quand l'offre souscrite ne
+couvre pas un appel, API-Football répond 200 avec un objet `errors` et une liste
+vide. Lire cela comme « pas de xG dans cette ligue » serait un contresens
+coûteux : on renoncerait à une variante du modèle pour une raison de
+facturation. Le script distingue les deux cas et le dit.
+
+Enfin, la couverture obtenue est **mesurée et affichée** à chaque exécution,
+champ par champ. Ne payez jamais pour du xG sans avoir vu ce chiffre sur vos
+ligues et vos saisons.
+
+| Étiquette des cotes | Quand |
+|---|---|
+| ouverture (défaut) | à chaque récupération |
+| clôture (`--closing`) | **uniquement** juste avant le coup d'envoi |
+
+Appeler « clôture » une cote relevée trois jours plus tôt fausserait toute la
+calibration, qui se mesure précisément contre cette ligne-là.
+
 ### Les cotes importées
 
 | Colonnes du fichier | Ce qui est enregistré |
@@ -720,7 +795,7 @@ demi-saison de championnat.
 | GET | `/sport/forecasts/scoreboard` | bilan du journal, en conditions réelles |
 | GET | `/sport/competitions/{id}/table` | classement enrichi + forces d'équipe |
 | GET | `/sport/teams/{id}/stats` | fiche d'équipe (forme, domicile/extérieur, Elo) |
-| POST | `/sport/matches/import` | import CSV en masse, **cotes comprises**, résultats ou affiches à venir |
+| POST | `/sport/matches/import` | import CSV en masse, **cotes comprises**, résultats ou affiches à venir ; complète et enrichit sans écraser |
 | POST | `/sport/matches/{id}/odds` | saisie des cotes |
 | POST | `/sport/bets` · PUT `/sport/bets/{id}/settle` | suivi des paris |
 | PUT | `/sport/matches/{id}/result` | score final + **règlement automatique des paris** |
@@ -758,6 +833,11 @@ Paramètres réglables sur l'analyse : `min_edge`, `kelly_fraction`,
   bruit. Le journal est là pour ça : il note une variante décidée à l'avance.
 - **Le backtest surestime** dès que les cotes historiques manquent ou ont été
   relevées après coup.
+- **Le xG d'API-Football n'est pas celui d'Opta ni celui de StatsBomb.** Chaque
+  fournisseur a son propre modèle de qualité de tir ; les totaux diffèrent. Ne
+  mélangez pas deux sources de xG dans une même compétition sans le savoir, et
+  ne comparez pas un skill score obtenu sur l'un à un chiffre publié pour
+  l'autre.
 - **Le journal demande de la patience et un peu de discipline.** Il faut
   importer les affiches à venir, geler, attendre, puis réimporter les résultats
   — chaque semaine. Rien de tout cela ne peut être rattrapé après coup : une
