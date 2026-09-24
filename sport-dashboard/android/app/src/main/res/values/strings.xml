@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SOKORA Sport</string>
+    <string name="title_activity_main">SOKORA Sport</string>
+    <string name="package_name">com.sokora.sport</string>
+    <string name="custom_url_scheme">com.sokora.sport</string>
+</resources>

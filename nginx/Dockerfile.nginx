@@ -11,6 +11,20 @@ ENV VITE_API_URL=$VITE_API_URL
 
 RUN npm run build
 
+# ── Étape 1 bis : build de SOKORA Sport (application installable) ─────
+FROM node:20-alpine AS sport-builder
+
+WORKDIR /sport
+COPY sport-dashboard/package*.json ./
+RUN npm ci
+COPY sport-dashboard/ .
+
+# Même origine que le reste : nginx relaie /api/ vers le backend.
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=$VITE_API_URL
+
+RUN npm run build
+
 # ── Étape 2 : Nginx avec les fichiers statiques intégrés ─────
 FROM nginx:1.25-alpine
 
@@ -24,6 +38,9 @@ RUN chmod +x /entrypoint.sh
 
 # Copier le build frontend
 COPY --from=frontend-builder /frontend/dist /usr/share/nginx/html
+
+# SOKORA Sport sous /sport/ : voir le bloc `location /sport/` de conf.d.
+COPY --from=sport-builder /sport/dist /usr/share/nginx/html/sport
 
 EXPOSE 80 443
 

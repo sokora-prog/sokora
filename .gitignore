@@ -27,3 +27,7 @@ backup_*.sql
 # OS
 .DS_Store
 Thumbs.db
+
+# Bases SQLite locales
+*.db
+*.db-journal

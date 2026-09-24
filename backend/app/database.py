@@ -19,7 +19,18 @@ SQLALCHEMY_DATABASE_URL = os.getenv(
     "postgresql+psycopg2://postgres:postgres@localhost:5432/sokora_db"
 )
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+# SQLite accepte une connexion depuis le seul thread qui l'a ouverte ; or
+# FastAPI sert les requêtes depuis un pool de threads. `check_same_thread`
+# lève cette contrainte, ce qui est sans danger ici : SQLAlchemy sérialise
+# déjà les accès par session. Sans cela, une installation locale sans
+# PostgreSQL échoue dès la première requête.
+_connect_args = (
+    {"check_same_thread": False}
+    if SQLALCHEMY_DATABASE_URL.startswith("sqlite")
+    else {}
+)
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

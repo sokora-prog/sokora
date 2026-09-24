@@ -1,0 +1,8 @@
+# Ne pas envoyer au démon Docker ce qui sera reconstruit ou ne sert pas au build :
+# le contexte serait sinon plusieurs centaines de mégaoctets, et chaque
+# construction interminable.
+node_modules
+dist
+android
+.env.local
+*.log
