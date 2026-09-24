@@ -45,12 +45,13 @@ import argparse
 import csv
 import io
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
 #: Un seul fichier pour tous les championnats : la colonne Div les distingue.
@@ -67,6 +68,42 @@ LEAGUE_NAMES = {
     "N1": "Eredivisie", "B1": "Jupiler Pro League",
     "P1": "Primeira Liga", "T1": "Süper Lig", "G1": "Super League Grèce",
 }
+
+
+def split_codes(jetons: List[str], option_leagues: Optional[str] = None):
+    """Range les codes de la ligne de commande en championnats et saisons.
+
+    Les positionnels étaient autrefois « league » puis « seasons ». Avec
+    ``--leagues``, argparse rangeait donc la première saison dans « league »,
+    qui était ensuite ignorée : ``--leagues F1 2627`` téléchargeait
+    silencieusement la saison par défaut. Demander 2026/2027 et recevoir
+    2024/2025 sans un mot est exactement le genre d'erreur que ce projet
+    refuse — et l'exemple documenté dans ce fichier en souffrait aussi, sans
+    que personne le voie, parce que la valeur avalée valait le défaut.
+
+    Un code de saison est fait de quatre chiffres, un code de championnat
+    contient toujours une lettre : la distinction ne demande pas de position.
+    """
+    leagues, seasons, inconnus = [], [], []
+    for jeton in jetons or []:
+        jeton = (jeton or "").strip()
+        if not jeton:
+            continue
+        if re.fullmatch(r"\d{4}", jeton):
+            seasons.append(jeton)
+        elif re.fullmatch(r"[A-Za-z]+\d*", jeton):
+            leagues.append(jeton.upper())
+        else:
+            inconnus.append(jeton)
+    if option_leagues:
+        leagues.extend(
+            code.strip().upper() for code in option_leagues.split(",") if code.strip()
+        )
+    return (
+        list(dict.fromkeys(leagues)) or ["E0"],
+        list(dict.fromkeys(seasons)) or ["2425"],
+        inconnus,
+    )
 
 
 def season_label(code: str) -> str:
@@ -148,6 +185,39 @@ def split_fixtures(csv_text: str) -> Dict[Tuple[str, str], str]:
     return sorties
 
 
+#: Ports où l'application se trouve couramment : 8000 en lancement direct,
+#: 8001 avec la pile Docker (docker-compose.sport.yml publie 8001:8000).
+PORTS_CONNUS = (8000, 8001, 8080, 8002)
+
+
+def diagnose_api(api: str) -> str:
+    """Message d'aide quand l'application ne répond pas à l'adresse donnée.
+
+    Le port par défaut n'est pas celui de la pile Docker : dire « l'API
+    répond-elle ? » sans chercher laisse l'utilisateur deviner. On regarde.
+    """
+    lignes = [f"L'application ne répond pas sur {api}."]
+    trouvés = []
+    for port in PORTS_CONNUS:
+        candidat = f"http://localhost:{port}"
+        if candidat.rstrip("/") == api.rstrip("/"):
+            continue
+        try:
+            requête = urllib.request.Request(f"{candidat}/sport/competitions")
+            with urllib.request.urlopen(requête, timeout=3):
+                trouvés.append(candidat)
+        except Exception:
+            continue
+    if trouvés:
+        lignes.append("Elle répond en revanche sur : " + ", ".join(trouvés))
+        lignes.append(f"  relancez la même commande avec --api {trouvés[0]}")
+    else:
+        lignes.append("Aucun port courant ne répond. Démarrez la pile :")
+        lignes.append("  docker compose -f docker-compose.sport.yml up -d")
+        lignes.append("puis vérifiez :  curl http://localhost:8001/sport/competitions")
+    return "\n   ".join(lignes)
+
+
 def post_import(api: str, payload: dict, timeout: int = 300) -> dict:
     request = urllib.request.Request(
         f"{api.rstrip('/')}/sport/matches/import",
@@ -227,7 +297,7 @@ def fetch_fixtures(args, leagues: List[str], out_dir) -> int:
             continue
         except Exception as error:
             print(f"   {nom} {saison} : échec — {error}")
-            print(f"   (l'API répond-elle sur {args.api} ?)")
+            print("   " + diagnose_api(args.api))
             échecs.append(f"{div}/{saison}")
             continue
 
@@ -267,10 +337,9 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("league", nargs="?", default="E0",
-                        help="Code du championnat (défaut : E0)")
-    parser.add_argument("seasons", nargs="*", default=["2425"],
-                        help="Codes de saison, ex. 2324 2425")
+    parser.add_argument("jetons", nargs="*", metavar="CODE",
+                        help="Championnats (E0, F1…) et saisons (2425, 2526…), "
+                             "dans n'importe quel ordre")
     parser.add_argument("--leagues", help="Plusieurs championnats séparés par des virgules")
     parser.add_argument("--api", default=DEFAULT_API, help=f"URL de l'API (défaut : {DEFAULT_API})")
     parser.add_argument("--out", help="Répertoire où conserver les CSV téléchargés")
@@ -285,11 +354,19 @@ def main() -> int:
                              "au lieu des saisons passées")
     args = parser.parse_args()
 
-    leagues = (
-        [code.strip().upper() for code in args.leagues.split(",") if code.strip()]
-        if args.leagues else [args.league.upper()]
-    )
-    seasons = args.seasons or ["2425"]
+    leagues, seasons, inconnus = split_codes(args.jetons, args.leagues)
+    if inconnus:
+        parser.error(
+            "codes incompréhensibles : " + ", ".join(inconnus)
+            + " — une saison s'écrit avec quatre chiffres (2627), un championnat "
+              "avec des lettres (F1)"
+        )
+
+    # Dit tout haut ce qui a été compris : une commande mal interprétée doit se
+    # voir à la première ligne, pas au moment où les chiffres surprennent.
+    print("Championnats : " + ", ".join(leagues))
+    if not args.fixtures:
+        print("Saisons      : " + ", ".join(season_label(c) for c in seasons))
     out_dir = Path(args.out) if args.out else None
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -345,7 +422,7 @@ def main() -> int:
                 continue
             except Exception as error:
                 print(f"   échec de l'import : {error}")
-                print(f"   (l'API répond-elle sur {args.api} ?)")
+                print("   " + diagnose_api(args.api))
                 failures.append(f"import {league}/{season}")
                 continue
 

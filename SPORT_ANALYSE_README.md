@@ -580,9 +580,21 @@ décisif : sans cotes de clôture, la calibration n'a aucune barre à franchir e
 l'onglet Réalisme ne peut rien conclure.
 
 ```bash
-# L'API doit tourner sur http://localhost:8000
 python3 backend/scripts/fetch_football_data.py E0 2223 2324 2425
 ```
+
+**Sur quel port tourne l'application ?** Les scripts visent
+`http://localhost:8000` par défaut, qui est l'adresse d'un lancement direct
+d'uvicorn. **La pile Docker publie l'API sur 8001** (`docker-compose.sport.yml`
+mappe `8001:8000`) : ajoutez alors `--api http://localhost:8001` à chaque
+commande. En cas de refus de connexion, les scripts cherchent d'eux-mêmes les
+ports courants et vous disent lequel répond.
+
+Championnats et saisons se donnent dans n'importe quel ordre, avec ou sans
+`--leagues` : un code à quatre chiffres est une saison, un code portant une
+lettre est un championnat. La première ligne de sortie répète ce qui a été
+compris — vérifiez-la, c'est elle qui vous dira si la commande a été lue comme
+vous le pensiez.
 
 Trois saisons de Premier League, soit ~1 140 matchs et plusieurs dizaines de
 milliers de cotes, dont celles de clôture. Puis :

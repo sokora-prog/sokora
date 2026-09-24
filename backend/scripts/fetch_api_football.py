@@ -508,6 +508,39 @@ def build_team_mapping(noms_source: List[str], noms_base: List[str],
 #  DIALOGUE AVEC L'APPLICATION
 # ═══════════════════════════════════════════════════════════════════════════
 
+#: Ports où l'application se trouve couramment : 8000 en lancement direct,
+#: 8001 avec la pile Docker (docker-compose.sport.yml publie 8001:8000).
+PORTS_CONNUS = (8000, 8001, 8080, 8002)
+
+
+def diagnose_api(api: str) -> str:
+    """Message d'aide quand l'application ne répond pas à l'adresse donnée.
+
+    Le port par défaut n'est pas celui de la pile Docker : dire « l'API
+    répond-elle ? » sans chercher laisse l'utilisateur deviner. On regarde.
+    """
+    lignes = [f"L'application ne répond pas sur {api}."]
+    trouvés = []
+    for port in PORTS_CONNUS:
+        candidat = f"http://localhost:{port}"
+        if candidat.rstrip("/") == api.rstrip("/"):
+            continue
+        try:
+            requête = urllib.request.Request(f"{candidat}/sport/competitions")
+            with urllib.request.urlopen(requête, timeout=3):
+                trouvés.append(candidat)
+        except Exception:
+            continue
+    if trouvés:
+        lignes.append("Elle répond en revanche sur : " + ", ".join(trouvés))
+        lignes.append(f"  relancez la même commande avec --api {trouvés[0]}")
+    else:
+        lignes.append("Aucun port courant ne répond. Démarrez la pile :")
+        lignes.append("  docker compose -f docker-compose.sport.yml up -d")
+        lignes.append("puis vérifiez :  curl http://localhost:8001/sport/competitions")
+    return "\n   ".join(lignes)
+
+
 def app_get(api: str, chemin: str, timeout: int = 60):
     requête = urllib.request.Request(f"{api.rstrip('/')}{chemin}")
     jeton = os.environ.get("SPORT_API_TOKEN")
@@ -817,7 +850,7 @@ def run(client: ApiFootball, arguments) -> int:
         return 7
     except Exception as erreur:
         print(f"\n   échec de l'import : {erreur}")
-        print(f"   (l'application répond-elle sur {arguments.api} ?)")
+        print("   " + diagnose_api(arguments.api))
         return 7
 
     print(f"\n   {résultat.get('created', 0)} matchs joués, "
